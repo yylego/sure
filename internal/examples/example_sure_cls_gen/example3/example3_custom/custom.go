@@ -1,0 +1,24 @@
+package example3_custom
+
+import (
+	"github.com/yylego/zaplog"
+	"go.uber.org/zap"
+)
+
+var NODE = &SureClass{}
+
+type SureClass struct{}
+
+// Must 硬硬的，当有err时直接panic崩溃掉，流程中止
+func (node *SureClass) Must(err error) {
+	if err != nil {
+		zaplog.LOGS.Skip1.Panic("Exception must not happen, terminating process", zap.Error(err))
+	}
+}
+
+// Soft 软软的，当有err时只打印个告警日志，流程继续
+func (node *SureClass) Soft(err error) {
+	if err != nil {
+		zaplog.LOGS.Skip1.Warn("Exception happened but process continues", zap.Error(err))
+	}
+}
