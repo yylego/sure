@@ -25,10 +25,12 @@ type SourceMethodsTuples []*SourceMethodsTuple
 
 // GetReceiverVariableName extracts the method context variable name
 // Scans method list to find first context name
+// Skips the blank identifier "_" (it cannot serve as a struct field or value)
 // Returns blank string when no context is found
 //
 // GetReceiverVariableName 从方法中提取接收器变量名
 // 扫描方法列表以查找第一个接收器名称
+// 跳过空白标识符 "_"（它不能当结构体字段或值使用）
 // 当未找到接收器时返回空字符串
 func (mts SourceMethodsTuples) GetReceiverVariableName() string {
 	for _, codePage := range mts {
@@ -43,7 +45,9 @@ func (mts SourceMethodsTuples) GetReceiverVariableName() string {
 				continue
 			}
 			name := mebFunction.Recv.List[0].Names[0].Name
-			if name != "" {
+			// 跳过空白接收者 "_"：若当成变量名，会生成 `struct{ _ *A }` 与 `&AMust{_:_}`（把 _ 当值）
+			// 及 `T._`（取空白字段），全都编译不过。视同"没名字"，继续找或最终退到 "T"。
+			if name != "" && name != "_" {
 				return name
 			}
 		}

@@ -16,7 +16,7 @@ func TestGenerate(t *testing.T) {
 			WithErrorHandlerFuncName("done"),
 		PackageName: syntaxgo.CurrentPackageName(),
 		ImportOptions: syntaxgo_ast.NewPackageImportOptions().
-			SetPkgPath("github.com/yylego/done"),
+			AddPkgPath("github.com/yylego/done"),
 		OutputPath: runtestpath.SrcPath(t),
 	}
 

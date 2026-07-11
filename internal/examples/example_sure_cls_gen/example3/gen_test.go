@@ -17,7 +17,7 @@ func TestGenerate(t *testing.T) {
 			WithErrorHandlerFuncName("example3_custom.NODE"),
 		PackageName: syntaxgo.CurrentPackageName(),
 		ImportOptions: syntaxgo_ast.NewPackageImportOptions().
-			SetInferredObject(example3_custom.SureClass{}),
+			AddInferredObject(example3_custom.SureClass{}),
 		OutputPath: runtestpath.SrcPath(t),
 	}
 	sure_cls_gen.GenerateClasses(cfg, Example{}, Demo{})

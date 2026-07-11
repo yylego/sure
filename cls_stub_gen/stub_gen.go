@@ -11,9 +11,7 @@ package cls_stub_gen
 
 import (
 	"fmt"
-	"go/ast"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,7 +23,6 @@ import (
 	"github.com/yylego/syntaxgo/syntaxgo_astnode"
 	"github.com/yylego/syntaxgo/syntaxgo_astnorm"
 	"github.com/yylego/syntaxgo/syntaxgo_reflect"
-	"github.com/yylego/syntaxgo/syntaxgo_search"
 	"github.com/yylego/zaplog"
 	"go.uber.org/zap"
 )
@@ -79,8 +76,6 @@ type StubGenConfig struct {
 // 扫描源代码并生成包装函数
 // 将格式化的代码写入指定的输出路径
 func GenerateStubs(config *StubGenConfig, stubParams ...*StubParam) {
-	utils.PrintObject(config)
-
 	must.Nice(config.SourceRootPath)
 	must.Nice(config.TargetPackageName)
 	must.Nice(config.OutputPath)
@@ -105,7 +100,7 @@ func GenerateStubs(config *StubGenConfig, stubParams ...*StubParam) {
 	}
 
 	for _, param := range stubParams {
-		importOptions.SetPkgPath(syntaxgo_reflect.GetPkgPathV3(param.object))
+		importOptions.AddPkgPath(syntaxgo_reflect.GetPkgPathV3(param.object))
 	}
 
 	// Inject import statements into code
@@ -152,8 +147,6 @@ func GenerateStubs(config *StubGenConfig, stubParams ...*StubParam) {
 // 从源代码提取方法并创建包装函数
 // 返回生成的代码作为字符串
 func GenerateStubMethods(cfg *StubGenConfig, stubParam *StubParam) string {
-	utils.PrintObject(cfg)
-
 	objectType := syntaxgo_reflect.GetTypeV3(stubParam.object)
 	zaplog.LOG.Debug("Analyzing object type to generate stubs",
 		zap.String("name", must.Nice(objectType.Name())),
@@ -162,33 +155,15 @@ func GenerateStubMethods(cfg *StubGenConfig, stubParam *StubParam) string {
 
 	utils.MustRoot(cfg.SourceRootPath)
 
-	var sourceMethodsTuples = make(utils.SourceMethodsTuples, 0)
-	for _, fileInfo := range done.VAE(os.ReadDir(cfg.SourceRootPath)).Done() {
-		if fileInfo.IsDir() {
-			continue
-		}
-		if filepath.Ext(fileInfo.Name()) != ".go" {
-			continue
-		}
-		path := filepath.Join(cfg.SourceRootPath, fileInfo.Name())
-		zaplog.LOG.Debug("Reading source file to extract stub methods", zap.String("path", path))
+	sourceMethodsTuples := utils.CollectReceiverMethods(cfg.SourceRootPath, objectType.Name())
 
-		sourceCode := done.VAE(os.ReadFile(path)).Done()
-
-		astBundle := done.VCE(syntaxgo_ast.NewAstBundleV1(sourceCode)).Nice()
-
-		astFile, _ := astBundle.GetBundle()
-
-		extractedFunctions := syntaxgo_search.ExtractFunctions(astFile)
-		methodList := syntaxgo_search.ExtractFunctionsByReceiverName(extractedFunctions, objectType.Name(), true)
-		if len(methodList) == 0 {
-			continue
-		}
-
-		sourceMethodsTuples = append(sourceMethodsTuples, &utils.SourceMethodsTuple{
-			SourceCode: sourceCode,
-			MethodList: methodList,
-		})
+	// 源包的包名前缀：把方法里的源包类型（含 []T / map / func 等复合类型）限定到目标包。
+	// 从反射类型名（形如 "demo.Foo"）取包名段，而非 GetPkgNameV3——后者内部是 path.Base，
+	// 对 /vN 版本化模块会得到 "v2"，与 import 绑定的真实包名（demo）不符、生成 v2.Item 编译不过。
+	// 已实测 reflect.Type.String() 取的是包名而非路径末段；与 pkg.go:GetPkgName 的 /vN 安全做法一致。
+	sourcePackageName := objectType.String()
+	if pkgName, _, ok := strings.Cut(sourcePackageName, "."); ok {
+		sourcePackageName = pkgName
 	}
 
 	ptx := utils.NewPTX()
@@ -199,12 +174,20 @@ func GenerateStubMethods(cfg *StubGenConfig, stubParam *StubParam) string {
 		for _, methodFunction := range methodList {
 			methodName := syntaxgo_astnode.GetText(sourceCode, methodFunction.Name)
 
+			// 仅包装导出方法：生成的 stub 位于目标包、跨包调用源包的方法，
+			// 未导出方法跨包不可见，生成出来必然编译不过。与 pkg_gen 的同款守卫一致。
+			if !utils.C0IsUppercase(methodName) {
+				continue
+			}
+
 			var methodParameters = make(syntaxgo_astnorm.NameTypeElements, 0)
 			if methodFunction.Type != nil && methodFunction.Type.Params != nil {
 				methodParameters = syntaxgo_astnorm.GetSimpleArgElements(methodFunction.Type.Params.List, sourceCode)
 
 				for _, elem := range methodParameters {
-					elem.AdjustTypeWithPackage(syntaxgo_reflect.GetPkgNameV3(stubParam.object), make(map[string]ast.Expr))
+					// 把方法里的源包类型（含 []Foo / map 等复合类型）限定到目标包。
+					// v0.0.1 的 AdjustTypeWithPackage 内部就是递归的 ResolveQualifiedType，与 cls_gen 用法一致。
+					elem.AdjustTypeWithPackage(sourcePackageName, nil, sourceCode)
 				}
 			}
 			var returnValues = make(syntaxgo_astnorm.NameTypeElements, 0)
@@ -212,7 +195,7 @@ func GenerateStubMethods(cfg *StubGenConfig, stubParam *StubParam) string {
 				returnValues = syntaxgo_astnorm.GetSimpleResElements(methodFunction.Type.Results.List, sourceCode)
 
 				for _, elem := range returnValues {
-					elem.AdjustTypeWithPackage(syntaxgo_reflect.GetPkgNameV3(stubParam.object), make(map[string]ast.Expr))
+					elem.AdjustTypeWithPackage(sourcePackageName, nil, sourceCode)
 				}
 			}
 

@@ -1,7 +1,7 @@
 [![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/yylego/sure/release.yml?branch=main&label=BUILD)](https://github.com/yylego/sure/actions/workflows/release.yml?query=branch%3Amain)
 [![GoDoc](https://pkg.go.dev/badge/github.com/yylego/sure)](https://pkg.go.dev/github.com/yylego/sure)
 [![Coverage Status](https://img.shields.io/coveralls/github/yylego/sure/main.svg)](https://coveralls.io/github/yylego/sure?branch=main)
-[![Supported Go Versions](https://img.shields.io/badge/Go-1.22%2C%201.23%2C%201.24%2C%201.25-lightgrey.svg)](https://github.com/yylego/sure)
+[![Supported Go Versions](https://img.shields.io/badge/Go-1.24%2C%201.25-lightgrey.svg)](https://github.com/yylego/sure)
 [![GitHub Release](https://img.shields.io/github/release/yylego/sure.svg)](https://github.com/yylego/sure/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/yylego/sure)](https://goreportcard.com/report/github.com/yylego/sure)
 
@@ -12,9 +12,11 @@
 ---
 
 <!-- TEMPLATE (EN) BEGIN: LANGUAGE NAVIGATION -->
+
 ## CHINESE README
 
 [中文说明](README.zh.md)
+
 <!-- TEMPLATE (EN) END: LANGUAGE NAVIGATION -->
 
 ## CREATION_IDEAS
@@ -38,21 +40,25 @@ The package provides three distinct generators, each serving different code tran
 ## Core Features
 
 🎯 **Three Assertion Modes**
+
 - **Must**: Crash on issues (panic-based)
 - **Soft**: Log warnings and continue execution
 - **Omit**: Silent mode - ignore issues
 
 ⚡ **Automatic Code Generation**
+
 - Transform existing code without modification
 - Generate type-safe wrappers with assertions
 - Preserve function signatures and documentation
 
 🔧 **Flexible Integration**
+
 - Works with existing Go projects
 - No runtime dependencies in generated code
 - Compatible with standard Go packages
 
 📦 **Multiple Generation Strategies**
+
 - Class-based: Wrap object methods
 - Package-based: Wrap package functions
 - Singleton-based: Wrap instance methods as package functions
@@ -109,6 +115,7 @@ The generated code handles assertions, enabling clean business logic.
 **Use Case**: When working with objects that have multiple methods returning issues, generate a wrapping class that handles all assertions.
 
 **How It Works**:
+
 1. Takes an existing struct/interface
 2. Analyzes all methods with issue returns
 3. Generates wrapping class with assertion methods
@@ -117,6 +124,7 @@ The generated code handles assertions, enabling clean business logic.
 **Example**:
 
 Source database client:
+
 ```go
 type DB struct { }
 
@@ -126,6 +134,7 @@ func (db *DB) Close() error
 ```
 
 Generated assertion wrapping:
+
 ```go
 type SureDB struct {
     db *DB
@@ -137,6 +146,7 @@ func (s *SureDB) Close() // panics on issue
 ```
 
 **Benefits**:
+
 - No hand-written assertion code needed
 - Type-safe wrappers
 - Clean business logic code
@@ -155,6 +165,7 @@ See: [sure_cls_gen example](internal/examples/example_sure_cls_gen)
 **Use Case**: When a package has multiple functions returning issues, generate a companion package with assertion versions.
 
 **How It Works**:
+
 1. Scans target package functions
 2. Identifies functions with issue returns
 3. Generates new package with assertion wrappers
@@ -163,6 +174,7 @@ See: [sure_cls_gen example](internal/examples/example_sure_cls_gen)
 **Example**:
 
 Source package functions:
+
 ```go
 package config
 
@@ -172,6 +184,7 @@ func Validate(cfg *Config) error
 ```
 
 Generated assertion package:
+
 ```go
 package sureconfig
 
@@ -181,6 +194,7 @@ func Validate(cfg *Config) // panics on issue
 ```
 
 **Benefits**:
+
 - Entire package gets assertion versions
 - No modification to source package
 - Use assertion package when appropriate
@@ -199,6 +213,7 @@ See: [sure_pkg_gen example](internal/examples/example_sure_pkg_gen)
 **Use Case**: When working with singleton patterns, provide package-scope functions as convenient wrappers.
 
 **How It Works**:
+
 1. Takes a struct with methods
 2. Assumes a singleton instance exists
 3. Generates package-scope functions
@@ -207,6 +222,7 @@ See: [sure_pkg_gen example](internal/examples/example_sure_pkg_gen)
 **Example**:
 
 Singleton object with methods:
+
 ```go
 type Logger struct { }
 
@@ -219,6 +235,7 @@ var defaultLogger = &Logger{}
 ```
 
 Generated package functions:
+
 ```go
 func Debug(msg string) {
     defaultLogger.Debug(msg)
@@ -238,6 +255,7 @@ func Error(msg string) {
 ```
 
 **Benefits**:
+
 - Simple API - no instance needed
 - Package-scope convenience functions
 - Consistent with standard Go package design
@@ -262,33 +280,35 @@ go get github.com/yylego/sure
 ### 1. Basic Class Wrapping Generation
 
 ```go
-import "github.com/yylego/sure/sure_cls_gen"
-
-// Generate assertion wrapping with Must mode
-options := sure_cls_gen.NewOptions().
-    WithPackageName("mypackage").
-    WithClassName("SureClient")
-
-code := sure_cls_gen.GenerateClassMethods(
-    originalObject,
-    options,
-    sure.MUST, // crash on issues
+import (
+    "github.com/yylego/sure"
+    "github.com/yylego/sure/sure_cls_gen"
 )
+
+// Generate assertion-wrapped classes into the output file
+cfg := &sure_cls_gen.ClassGenConfig{
+    ClassGenOptions: sure_cls_gen.NewClassGenOptions(sourceRoot),
+    PackageName:     "mypackage",
+    OutputPath:      outputPath,
+}
+
+sure_cls_gen.GenerateClasses(cfg, originalObject)
 ```
 
 ### 2. Package Function Wrapping Generation
 
 ```go
-import "github.com/yylego/sure/sure_pkg_gen"
+import (
+    "github.com/yylego/sure"
+    "github.com/yylego/sure/sure_pkg_gen"
+)
 
-// Generate assertion package
-config := sure_pkg_gen.NewSurePackageConfig(
-    projectPath,
+// Generate an assertion-enabled companion package next to the source
+sure_pkg_gen.GenerateSurePackage(
+    sourceRoot,
     sure.MUST,
     "original/package/path",
 )
-
-functions := sure_pkg_gen.GenerateSureFunctions(t, config, outputPath)
 ```
 
 ### 3. Singleton Wrapping Generation
@@ -316,6 +336,7 @@ code := cls_stub_gen.GenerateStubMethods(
 ### Scenario 1: Database Operations
 
 Source code with repetitive checks:
+
 ```go
 conn, err := db.Connect(dsn)
 if err != nil { return err }
@@ -328,6 +349,7 @@ if err != nil { return err }
 ```
 
 With `sure_cls_gen`:
+
 ```go
 sureDB := NewSureDB(db)
 sureDB.Connect(dsn)
@@ -338,6 +360,7 @@ sureDB.Close()
 ### Scenario 2: Configuration Management
 
 Source code:
+
 ```go
 cfg, err := config.Load("app.json")
 if err != nil { return err }
@@ -347,6 +370,7 @@ if err != nil { return err }
 ```
 
 With `sure_pkg_gen`:
+
 ```go
 cfg := sureconfig.Load("app.json")
 sureconfig.Validate(cfg)
@@ -355,6 +379,7 @@ sureconfig.Validate(cfg)
 ### Scenario 3: API Client Usage
 
 Source singleton:
+
 ```go
 client.SetEndpoint(url)
 response, err := client.Get("/api/data")
@@ -362,6 +387,7 @@ if err != nil { return err }
 ```
 
 With `cls_stub_gen`:
+
 ```go
 SetEndpoint(url)
 response := Get("/api/data")
@@ -374,6 +400,7 @@ response := Get("/api/data")
 ### When to Use Must Mode
 
 Use `sure.MUST` when:
+
 - Issues are unrecoverable
 - Application cannot continue with issues
 - During initialization and setup
@@ -382,6 +409,7 @@ Use `sure.MUST` when:
 ### When to Use Soft Mode
 
 Use `sure.SOFT` when:
+
 - Issues should be logged but not crash
 - Smooth degradation is acceptable
 - In production with fallback logic
@@ -390,6 +418,7 @@ Use `sure.SOFT` when:
 ### When to Use Omit Mode
 
 Use `sure.OMIT` when:
+
 - Issues are expected and acceptable
 - Silent failure is desired
 - Performance-sensitive paths
@@ -407,11 +436,13 @@ Use `sure.OMIT` when:
 Use `done` when writing new code, use `sure` to wrap existing code.
 
 **Example with done**:
+
 ```go
 config := done.VAE(LoadConfig()).Nice()
 ```
 
 **Example with sure**:
+
 ```go
 config := sureConfig.Load() // generated wrapping
 ```
@@ -429,6 +460,7 @@ Comprehensive examples demonstrating each generation approach:
 - [**cls_stub_gen Example**](internal/examples/example_cls_stub_gen) - Singleton wrapping generation
 
 Each example includes:
+
 - Source code setup
 - Generation configuration
 - Generated code output

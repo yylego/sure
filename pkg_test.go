@@ -3,6 +3,7 @@ package sure_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/yylego/sure"
 )
 
@@ -21,5 +22,5 @@ func TestGetPkgPath(t *testing.T) {
 // TestGetPkgName 测试 GetPkgName 函数
 // 验证可以通过反射获取包名
 func TestGetPkgName(t *testing.T) {
-	t.Log(sure.GetPkgName())
+	require.Equal(t, "sure", sure.GetPkgName())
 }

@@ -1,7 +1,7 @@
 [![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/yylego/sure/release.yml?branch=main&label=BUILD)](https://github.com/yylego/sure/actions/workflows/release.yml?query=branch%3Amain)
 [![GoDoc](https://pkg.go.dev/badge/github.com/yylego/sure)](https://pkg.go.dev/github.com/yylego/sure)
 [![Coverage Status](https://img.shields.io/coveralls/github/yylego/sure/main.svg)](https://coveralls.io/github/yylego/sure?branch=main)
-[![Supported Go Versions](https://img.shields.io/badge/Go-1.22%2C%201.23%2C%201.24%2C%201.25-lightgrey.svg)](https://github.com/yylego/sure)
+[![Supported Go Versions](https://img.shields.io/badge/Go-1.24%2C%201.25-lightgrey.svg)](https://github.com/yylego/sure)
 [![GitHub Release](https://img.shields.io/github/release/yylego/sure.svg)](https://github.com/yylego/sure/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/yylego/sure)](https://goreportcard.com/report/github.com/yylego/sure)
 
@@ -12,9 +12,11 @@
 ---
 
 <!-- TEMPLATE (ZH) BEGIN: LANGUAGE NAVIGATION -->
+
 ## 英文文档
 
 [ENGLISH README](README.md)
+
 <!-- TEMPLATE (ZH) END: LANGUAGE NAVIGATION -->
 
 ## 创作背景
@@ -38,21 +40,25 @@
 ## 核心特性
 
 🎯 **三种断言模式**
+
 - **Must**: 遇到问题时崩溃（基于 panic）
 - **Soft**: 记录警告并继续执行
 - **Omit**: 静默模式 - 忽略问题
 
 ⚡ **自动代码生成**
+
 - 无需修改即可转换现有代码
 - 生成类型安全的断言包装
 - 保留函数签名和文档
 
 🔧 **灵活集成**
+
 - 适用于现有 Go 项目
 - 生成的代码无运行时依赖
 - 兼容标准 Go 包
 
 📦 **多种生成策略**
+
 - 基于类：包装对象方法
 - 基于包：包装包函数
 - 基于单例：将实例方法包装为包级函数
@@ -109,6 +115,7 @@ config := sureConfig.ReadConfig("config.json")
 **使用场景**：当处理具有多个返回问题的方法的对象时，生成处理所有断言的包装类。
 
 **工作原理**：
+
 1. 获取现有的结构体/接口
 2. 分析所有返回问题的方法
 3. 生成带有断言方法的包装类
@@ -117,6 +124,7 @@ config := sureConfig.ReadConfig("config.json")
 **示例**：
 
 源数据库客户端：
+
 ```go
 type DB struct { }
 
@@ -126,6 +134,7 @@ func (db *DB) Close() error
 ```
 
 生成的断言包装：
+
 ```go
 type SureDB struct {
     db *DB
@@ -137,6 +146,7 @@ func (s *SureDB) Close() // 遇到问题时 panic
 ```
 
 **优势**：
+
 - 无需手动编写断言代码
 - 类型安全的包装
 - 更简洁的业务逻辑代码
@@ -155,6 +165,7 @@ func (s *SureDB) Close() // 遇到问题时 panic
 **使用场景**：当一个包有多个返回问题的函数时，生成带有断言版本的配套包。
 
 **工作原理**：
+
 1. 扫描目标包函数
 2. 识别返回问题的函数
 3. 生成带有断言包装的新包
@@ -163,6 +174,7 @@ func (s *SureDB) Close() // 遇到问题时 panic
 **示例**：
 
 源包函数：
+
 ```go
 package config
 
@@ -172,6 +184,7 @@ func Validate(cfg *Config) error
 ```
 
 生成的断言包：
+
 ```go
 package sureconfig
 
@@ -181,6 +194,7 @@ func Validate(cfg *Config) // 遇到问题时 panic
 ```
 
 **优势**：
+
 - 整个包获得断言版本
 - 无需修改原始包
 - 在适当时使用断言包
@@ -199,6 +213,7 @@ func Validate(cfg *Config) // 遇到问题时 panic
 **使用场景**：在使用单例模式时，提供包作用域函数作为便捷包装。
 
 **工作原理**：
+
 1. 获取带有方法的结构体
 2. 假设存在单例实例
 3. 生成包作用域函数
@@ -207,6 +222,7 @@ func Validate(cfg *Config) // 遇到问题时 panic
 **示例**：
 
 带有方法的单例对象：
+
 ```go
 type Logger struct { }
 
@@ -219,6 +235,7 @@ var defaultLogger = &Logger{}
 ```
 
 生成的包级函数：
+
 ```go
 func Debug(msg string) {
     defaultLogger.Debug(msg)
@@ -238,6 +255,7 @@ func Error(msg string) {
 ```
 
 **优势**：
+
 - 简单的 API - 无需实例
 - 包作用域便捷函数
 - 与标准 Go 包设计一致
@@ -262,33 +280,35 @@ go get github.com/yylego/sure
 ### 1. 基础类包装生成
 
 ```go
-import "github.com/yylego/sure/sure_cls_gen"
-
-// 使用 Must 模式生成断言包装
-options := sure_cls_gen.NewOptions().
-    WithPackageName("mypackage").
-    WithClassName("SureClient")
-
-code := sure_cls_gen.GenerateClassMethods(
-    originalObject,
-    options,
-    sure.MUST, // 遇到问题时崩溃
+import (
+    "github.com/yylego/sure"
+    "github.com/yylego/sure/sure_cls_gen"
 )
+
+// 将断言包装类生成到输出文件
+cfg := &sure_cls_gen.ClassGenConfig{
+    ClassGenOptions: sure_cls_gen.NewClassGenOptions(sourceRoot),
+    PackageName:     "mypackage",
+    OutputPath:      outputPath,
+}
+
+sure_cls_gen.GenerateClasses(cfg, originalObject)
 ```
 
 ### 2. 包函数包装生成
 
 ```go
-import "github.com/yylego/sure/sure_pkg_gen"
+import (
+    "github.com/yylego/sure"
+    "github.com/yylego/sure/sure_pkg_gen"
+)
 
-// 生成断言包
-config := sure_pkg_gen.NewSurePackageConfig(
-    projectPath,
+// 在源包旁生成一个带断言的伴生包
+sure_pkg_gen.GenerateSurePackage(
+    sourceRoot,
     sure.MUST,
     "original/package/path",
 )
-
-functions := sure_pkg_gen.GenerateSureFunctions(t, config, outputPath)
 ```
 
 ### 3. 单例包装生成
@@ -316,6 +336,7 @@ code := cls_stub_gen.GenerateStubMethods(
 ### 场景 1：数据库操作
 
 带有重复检查的源代码：
+
 ```go
 conn, err := db.Connect(dsn)
 if err != nil { return err }
@@ -328,6 +349,7 @@ if err != nil { return err }
 ```
 
 使用 `sure_cls_gen`：
+
 ```go
 sureDB := NewSureDB(db)
 sureDB.Connect(dsn)
@@ -338,6 +360,7 @@ sureDB.Close()
 ### 场景 2：配置管理
 
 源代码：
+
 ```go
 cfg, err := config.Load("app.json")
 if err != nil { return err }
@@ -347,6 +370,7 @@ if err != nil { return err }
 ```
 
 使用 `sure_pkg_gen`：
+
 ```go
 cfg := sureconfig.Load("app.json")
 sureconfig.Validate(cfg)
@@ -355,6 +379,7 @@ sureconfig.Validate(cfg)
 ### 场景 3：API 客户端使用
 
 源单例：
+
 ```go
 client.SetEndpoint(url)
 response, err := client.Get("/api/data")
@@ -362,6 +387,7 @@ if err != nil { return err }
 ```
 
 使用 `cls_stub_gen`：
+
 ```go
 SetEndpoint(url)
 response := Get("/api/data")
@@ -374,6 +400,7 @@ response := Get("/api/data")
 ### 何时使用 Must 模式
 
 在以下情况使用 `sure.MUST`：
+
 - 问题无法恢复
 - 应用程序无法继续处理问题
 - 初始化和设置期间
@@ -382,6 +409,7 @@ response := Get("/api/data")
 ### 何时使用 Soft 模式
 
 在以下情况使用 `sure.SOFT`：
+
 - 问题应该记录但不崩溃
 - 可接受优雅降级
 - 在生产环境中有回退逻辑
@@ -390,6 +418,7 @@ response := Get("/api/data")
 ### 何时使用 Omit 模式
 
 在以下情况使用 `sure.OMIT`：
+
 - 问题是预期且可接受的
 - 希望静默失败
 - 性能关键路径
@@ -407,11 +436,13 @@ response := Get("/api/data")
 编写新代码时使用 `done`，包装现有代码时使用 `sure`。
 
 **done 示例**：
+
 ```go
 config := done.VAE(LoadConfig()).Nice()
 ```
 
 **sure 示例**：
+
 ```go
 config := sureConfig.Load() // 生成的包装
 ```
@@ -429,6 +460,7 @@ config := sureConfig.Load() // 生成的包装
 - [**cls_stub_gen 示例**](internal/examples/example_cls_stub_gen) - 单例包装生成
 
 每个示例包括：
+
 - 源代码设置
 - 生成配置
 - 生成的代码输出

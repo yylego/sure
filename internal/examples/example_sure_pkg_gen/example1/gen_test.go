@@ -13,7 +13,7 @@ type ObjectType struct{}
 
 func TestGenerate(t *testing.T) {
 	pkgPath := syntaxgo_reflect.GetPkgPathV2[ObjectType]()
-	sure_pkg_gen.GenerateSurePackage(t, runpath.PARENT.Path(), sure.SOFT, pkgPath)
-	sure_pkg_gen.GenerateSurePackage(t, runpath.PARENT.Path(), sure.MUST, pkgPath)
-	sure_pkg_gen.GenerateSurePackage(t, runpath.PARENT.Path(), sure.OMIT, pkgPath)
+	sure_pkg_gen.GenerateSurePackage(runpath.PARENT.Path(), sure.SOFT, pkgPath)
+	sure_pkg_gen.GenerateSurePackage(runpath.PARENT.Path(), sure.MUST, pkgPath)
+	sure_pkg_gen.GenerateSurePackage(runpath.PARENT.Path(), sure.OMIT, pkgPath)
 }

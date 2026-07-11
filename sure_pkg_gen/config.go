@@ -17,6 +17,12 @@ type SurePackageGenConfig struct {
 	HandlerFuncReference string                 // Exception handling function reference // 异常处理函数引用
 	NewPkgName           string                 // New package name (auto-generated when not set) // 新包名（未设置时自动生成）
 	OutputRoot           string                 // Output root path // 输出根路径
+
+	// genPosFuncMark records the caller position captured at a public entry, so
+	// the "Generated from:" trace stays correct regardless of which entry is used.
+	// genPosFuncMark 记录公共入口处捕获的调用位置，让"Generated from:"追踪行
+	// 无论从哪个入口进入都指向正确的用户调用点。
+	genPosFuncMark string
 }
 
 // NewSurePackageConfig creates a new package generation configuration

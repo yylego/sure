@@ -47,7 +47,7 @@ func TestGenerateSureFunctions(t *testing.T) {
 
 	config := NewSurePackageConfig(runpath.PARENT.Path(), sure.MUST, pkgPath)
 
-	sureFunctions := GenerateSureFunctions(t, config, path)
+	sureFunctions := GenerateSureFunctions(config, path)
 
 	for _, sureFunction := range sureFunctions {
 		t.Log(sureFunction)

@@ -12,7 +12,6 @@ package sure_cls_gen
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -26,7 +25,6 @@ import (
 	"github.com/yylego/syntaxgo/syntaxgo_astnode"
 	"github.com/yylego/syntaxgo/syntaxgo_astnorm"
 	"github.com/yylego/syntaxgo/syntaxgo_reflect"
-	"github.com/yylego/syntaxgo/syntaxgo_search"
 	"github.com/yylego/tern/zerotern"
 	"github.com/yylego/zaplog"
 	"go.uber.org/zap"
@@ -53,9 +51,7 @@ type ClassGenConfig struct {
 // GenerateClasses 从给定对象创建带断言包装的类
 // 根据配置设置自动生成带有异常处理的代码
 // 将格式化的代码写入配置中指定的输出路径
-func GenerateClasses(cfg *ClassGenConfig, objects ...interface{}) {
-	utils.PrintObject(cfg)
-
+func GenerateClasses(cfg *ClassGenConfig, objects ...any) {
 	must.Nice(cfg.ClassGenOptions.SourceRootPath)
 	must.Nice(cfg.PackageName)
 	must.Nice(cfg.OutputPath)
@@ -83,7 +79,7 @@ func GenerateClasses(cfg *ClassGenConfig, objects ...interface{}) {
 	} else {
 		// Use default Must and Soft functions, add package reference to help code formatting
 		// 使用默认的 Must 和 Soft 函数，补充包引用以帮助代码格式化
-		importOptions.SetInferredObject(syntaxgo_reflect.GetObject[sure.ErrorHandlingMode]())
+		importOptions.AddInferredObject(syntaxgo_reflect.GetObject[sure.ErrorHandlingMode]())
 	}
 
 	// Inject import statements into code
@@ -118,9 +114,7 @@ func GenerateClasses(cfg *ClassGenConfig, objects ...interface{}) {
 // GenerateClassCodeWithErrorHandling 使用多个异常处理模式生成类代码
 // 为每个配置的异常处理模式创建包装代码
 // 返回组合的生成代码作为字符串
-func GenerateClassCodeWithErrorHandling(cfg *ClassGenOptions, object interface{}) string {
-	utils.PrintObject(cfg)
-
+func GenerateClassCodeWithErrorHandling(cfg *ClassGenOptions, object any) string {
 	ptx := utils.NewPTX()
 	for _, errorHandlingMode := range cfg.GetErrorHandlingModes() {
 		ptx.Println(GenerateClassWithErrorHandlingMode(cfg, object, errorHandlingMode))
@@ -135,9 +129,7 @@ func GenerateClassCodeWithErrorHandling(cfg *ClassGenOptions, object interface{}
 // GenerateClassWithErrorHandlingMode 使用特定异常处理模式生成包装类
 // 扫描源代码提取方法并创建带断言包装的版本
 // 返回格式正确的生成代码字符串
-func GenerateClassWithErrorHandlingMode(cfg *ClassGenOptions, object interface{}, errorHandlingMode sure.ErrorHandlingMode) string {
-	utils.PrintObject(cfg)
-
+func GenerateClassWithErrorHandlingMode(cfg *ClassGenOptions, object any, errorHandlingMode sure.ErrorHandlingMode) string {
 	objectType := reflect.TypeOf(object)
 	zaplog.LOG.Debug("Analyzing object type information",
 		zap.String("name", must.Nice(objectType.Name())),
@@ -152,47 +144,22 @@ func GenerateClassWithErrorHandlingMode(cfg *ClassGenOptions, object interface{}
 		must.True(errorHandlingMode == sure.MUST || errorHandlingMode == sure.SOFT)
 	}
 
-	var sourceMethodsTuples = make(utils.SourceMethodsTuples, 0)
-	for _, fileInfo := range done.VAE(os.ReadDir(cfg.SourceRootPath)).Done() {
-		if fileInfo.IsDir() {
-			continue
-		}
-		if filepath.Ext(fileInfo.Name()) != ".go" {
-			continue
-		}
-		path := filepath.Join(cfg.SourceRootPath, fileInfo.Name())
-		zaplog.LOG.Debug("Reading source file to extract methods", zap.String("path", path))
+	sourceMethodsTuples := utils.CollectReceiverMethods(cfg.SourceRootPath, objectType.Name())
 
-		sourceCode := done.VAE(os.ReadFile(path)).Done()
-
-		astBundle := done.VCE(syntaxgo_ast.NewAstBundleV1(sourceCode)).Nice()
-
-		astFile, _ := astBundle.GetBundle()
-
-		extractedFunctions := syntaxgo_search.ExtractFunctions(astFile)
-		methodList := syntaxgo_search.ExtractFunctionsByReceiverName(extractedFunctions, objectType.Name(), true)
-		if len(methodList) == 0 {
-			continue
-		}
-
-		sourceMethodsTuples = append(sourceMethodsTuples, &utils.SourceMethodsTuple{
-			SourceCode: sourceCode,
-			MethodList: methodList,
-		})
-	}
-
-	// when zero - set a new value
-	zerotern.SetPF(&cfg.ReceiverVariableName, func() string {
+	// 接收者变量名：优先用配置值，否则用源方法探测到的名字，再退到 "T"。
+	// 用局部变量而非回写 cfg.ReceiverVariableName，避免对入参的意外副作用
+	// （多对象共用一个 cfg 时，首个对象探测到的名字会被后续对象复用）。
+	receiverVariableName := zerotern.VF(cfg.ReceiverVariableName, func() string {
 		return zerotern.VV(sourceMethodsTuples.GetReceiverVariableName(), "T")
 	})
 
 	newClassName := cfg.GenerateNewClassName(reflect.TypeOf(object), errorHandlingMode)
 
 	ptx := utils.NewPTX()
-	ptx.Println(`type ` + newClassName + ` struct{` + cfg.ReceiverVariableName + ` *` + objectType.Name() + `}`)
+	ptx.Println(`type ` + newClassName + ` struct{` + receiverVariableName + ` *` + objectType.Name() + `}`)
 	ptx.Println(`
-		func(` + cfg.ReceiverVariableName + ` *` + objectType.Name() + `) ` + string(errorHandlingMode) + `() * ` + newClassName + `{
-		return & ` + newClassName + `{` + cfg.ReceiverVariableName + `:` + cfg.ReceiverVariableName + `}
+		func(` + receiverVariableName + ` *` + objectType.Name() + `) ` + string(errorHandlingMode) + `() * ` + newClassName + `{
+		return & ` + newClassName + `{` + receiverVariableName + `:` + receiverVariableName + `}
 	}`)
 
 	for _, sourceMethodsTuple := range sourceMethodsTuples {
@@ -216,6 +183,20 @@ func GenerateClassWithErrorHandlingMode(cfg *ClassGenOptions, object interface{}
 				results = syntaxgo_astnorm.GetSimpleResElements(methodFunc.Type.Results.List, sourceCode)
 			}
 
+			// 合成的返回值名避让形参名：源方法 func (a *A) Get(res string) (int, error) 的匿名返回
+			// 会被 GetSimpleResElements 命名为 res，与形参 res 撞车——具名返回处重复声明、方法体 := 左侧也撞。
+			// 仅重命名撞车项，与 sure_pkg_gen 的同类保护(utils.UniqueName)保持一致。
+			takenNames := make(map[string]bool, len(params))
+			for _, param := range params {
+				takenNames[param.Name] = true
+			}
+			for _, result := range results {
+				if takenNames[result.Name] {
+					result.Name = utils.UniqueName(result.Name, takenNames)
+				}
+				takenNames[result.Name] = true
+			}
+
 			for _, elem := range results {
 				zaplog.LOG.Debug("Processing method return element", zap.String("name", elem.Name), zap.String("kind", elem.Kind))
 			}
@@ -237,13 +218,21 @@ func GenerateClassWithErrorHandlingMode(cfg *ClassGenOptions, object interface{}
 				errorHandlingStatements = append(errorHandlingStatements, sureNode+"."+string(errorHandlingMode)+"("+errName+")")
 			}
 
-			ptx.Println(`func (T *` + newClassName + `) ` + methodName + `(` +
+			// 包装方法的接收者名：避开字段名（否则生成 a.a）和本方法的参数名
+			// （否则会遮蔽/撞车，如名为 T 的泛型风格参数）。基名 "T"，冲突则加序号。
+			reservedNames := map[string]bool{receiverVariableName: true}
+			for _, param := range params {
+				reservedNames[param.Name] = true
+			}
+			recvName := utils.UniqueName("T", reservedNames)
+
+			ptx.Println(`func (` + recvName + ` *` + newClassName + `) ` + methodName + `(` +
 				params.FormatNamesWithKinds().MergeParts() +
 				`)` + `(` +
 				rightResultElements.FormatNamesWithKinds().MergeParts() +
 				`) {`)
 
-			methodInvocationStatement := `T.` + cfg.ReceiverVariableName + `.` + methodName + `(` + params.GenerateFunctionParams().MergeParts() + `)`
+			methodInvocationStatement := recvName + `.` + receiverVariableName + `.` + methodName + `(` + params.GenerateFunctionParams().MergeParts() + `)`
 			if len(results) > 0 {
 				if len(rightResultElements) == len(results) {
 					ptx.Println(results.GenerateFunctionParams().MergeParts() + "=" + methodInvocationStatement)

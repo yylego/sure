@@ -15,7 +15,7 @@ func TestGenerate(t *testing.T) {
 	pkgPath := syntaxgo_reflect.GetPkgPathV2[ObjectType]()
 
 	//选择生成 soft 软包
-	sure_pkg_gen.GenerateSurePackage(t, runpath.PARENT.Path(), sure.SOFT, pkgPath)
+	sure_pkg_gen.GenerateSurePackage(runpath.PARENT.Path(), sure.SOFT, pkgPath)
 	//选择生成 must 硬包
-	sure_pkg_gen.GenerateSurePackage(t, runpath.PARENT.Path(), sure.MUST, pkgPath)
+	sure_pkg_gen.GenerateSurePackage(runpath.PARENT.Path(), sure.MUST, pkgPath)
 }

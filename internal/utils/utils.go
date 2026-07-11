@@ -18,11 +18,9 @@ import (
 	"slices"
 	"unicode"
 
-	"github.com/kr/pretty"
 	"github.com/pkg/errors"
 	"github.com/yylego/done"
 	"github.com/yylego/erero"
-	"github.com/yylego/zaplog"
 )
 
 // Neat2json converts value to formatted JSON string
@@ -32,7 +30,7 @@ import (
 // Neat2json 将值转换为格式化的 JSON 字符串
 // 使用带缩进的 JSON 格式提高可读性
 // 异常时 panic 以确保无效数据不被忽略
-func Neat2json(v interface{}) string {
+func Neat2json(v any) string {
 	data, err := NeatBytes(v)
 	if err != nil {
 		panic(errors.WithMessage(err, "wrong"))
@@ -47,7 +45,7 @@ func Neat2json(v interface{}) string {
 // NeatBytes 将值转换为格式化的 JSON 字节
 // 返回带缩进的 JSON 提高可读性
 // 如果编组失败则返回异常
-func NeatBytes(v interface{}) ([]byte, error) {
+func NeatBytes(v any) ([]byte, error) {
 	data, err := json.MarshalIndent(v, "", "\t")
 	if err != nil {
 		return nil, errors.WithMessage(err, "wrong")
@@ -154,7 +152,7 @@ func MustLs(root string) (names []string) {
 
 // C0IsUppercase checks if first character is uppercase
 // Returns true when string starts with uppercase letter
-// Returns false when string is blank and starts with lowercase
+// Returns false when string is blank or starts with lowercase
 //
 // C0IsUppercase 检查首字符是否为大写
 // 当字符串以大写字母开头时返回 true
@@ -176,32 +174,6 @@ func C0IsUppercase(s string) bool {
 // 返回准备插入代码的带引号字符串
 func SetDoubleQuotes(s string) string {
 	return "\"" + s + "\""
-}
-
-// Boolean returns the boolean value as is
-// Simple identity function on bool type
-// Used to make boolean expressions explicit
-//
-// Boolean 原样返回布尔值
-// 布尔类型的简单恒等函数
-// 用于使布尔表达式更明确
-func Boolean(v bool) bool {
-	return v
-}
-
-// PrintObject prints object with debug markers
-// Uses pretty printing to make output readable
-// Adds separators to make debug output distinct
-//
-// PrintObject 使用调试标记打印对象
-// 使用美化打印提高可读性
-// 添加分隔符使调试输出更清晰
-func PrintObject(a any) {
-	zaplog.LOGS.Skip1.Debug("------------")
-	zaplog.LOGS.Skip1.Debug("---object---")
-	done.VNE(pretty.Println(a)).Fine()
-	zaplog.LOGS.Skip1.Debug("------------")
-	zaplog.LOGS.Skip1.Debug("------------")
 }
 
 // GetGenPosFuncMark gets position information to trace code generation
