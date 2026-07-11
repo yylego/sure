@@ -88,7 +88,7 @@ type BlankSample struct{}
 // Do uses a blank receiver on purpose.
 //
 // Do 故意使用空白接收者。
-func (_ *BlankSample) Do(x int) (int, error) { return x, nil }
+func (_ *BlankSample) Do(x int) (int, error) { return x, nil } //nolint:staticcheck // keep blank recv token in source so the test can scan it
 
 // TestClassBlankReceiverFallsBackToT guards that a blank receiver "_" on the
 // wrapped type does not leak into the generated struct field and constructor.
