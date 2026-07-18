@@ -12,7 +12,7 @@ require (
 	github.com/yylego/printgo v0.0.0
 	github.com/yylego/rese v0.0.0
 	github.com/yylego/runpath v0.0.7
-	github.com/yylego/syntaxgo v0.0.1
+	github.com/yylego/syntaxgo v0.0.2
 	github.com/yylego/tern v0.0.0
 	github.com/yylego/zaplog v0.0.1
 	go.uber.org/zap v1.28.0
