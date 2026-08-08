@@ -30,6 +30,21 @@ const (
 	OMIT ErrorHandlingMode = "Omit" // Omit mode: ignores exceptions // 忽略模式：忽略异常
 )
 
+// ErrorHandlingModes returns each mode sure states, in the sequence above
+//
+// The codegens name a mode as a method on the wrapped type, so these need the whole set to split a generated entrance apart from a source method
+// The set a given run wants does not settle that, since a past run could have written a mode this run leaves out
+// Returns a fresh slice, so callers sorting / trimming it leave the next one's duplicate alone
+//
+// ErrorHandlingModes 返回 sure 声明的全部模式，顺序与上面一致。
+//
+// 生成器把模式写成被包装类型上的一个方法，所以要认出"哪个方法是生成出来的入口"，得拿全集来比
+// 本轮想生成的那几个回答不了这个问题，因为上一轮完全可能写下一个本轮不再要的模式
+// 返回的是新切片，调用方拿去排序或截断都不会动到下一个调用方那份
+func ErrorHandlingModes() []ErrorHandlingMode {
+	return []ErrorHandlingMode{MUST, SOFT, OMIT}
+}
+
 // Must crashes the program when an exception occurs
 // Stops execution with panic when exception is non-nil
 // Used when exceptions are unacceptable and program should stop

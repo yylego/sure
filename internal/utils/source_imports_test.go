@@ -47,9 +47,9 @@ func tupleFromSource(t *testing.T, sourceCode string) *SourceMethodsTuple {
 	t.Helper()
 	astFile := parseSource(t, sourceCode)
 	var methodList []*ast.FuncDecl
-	for _, decl := range astFile.Decls {
-		if funcDecl, ok := decl.(*ast.FuncDecl); ok {
-			methodList = append(methodList, funcDecl)
+	for _, astDeclaration := range astFile.Decls {
+		if astFunc, ok := astDeclaration.(*ast.FuncDecl); ok {
+			methodList = append(methodList, astFunc)
 		}
 	}
 	return &SourceMethodsTuple{
@@ -155,6 +155,39 @@ func TestFormatGoBuildDirective(t *testing.T) {
 	require.Equal(t, "//go:build !sure_generate", FormatGoBuildDirective("//go:build !sure_generate"))
 }
 
+// TestPickGoBuildDirectiveTellsTheTwoBlanksApart checks a blank no one settled picks up the fallback, and that a blank settled on purpose stands
+// TestPickGoBuildDirectiveTellsTheTwoBlanksApart 检查"没人表态的空"会吃到兜底值，而"特意留的空"照旧算数
+func TestPickGoBuildDirectiveTellsTheTwoBlanksApart(t *testing.T) {
+	// No one spoke, so the fallback steps in — the shape a bare struct value gives
+	// 没人表态，兜底值补上——直接写结构体字面量就是这个形状
+	require.Equal(t, "!sure_generate", PickGoBuildDirective("", false, "!sure_generate"))
+	// Settled blank on purpose, which WithNoBuildDirective means, so nothing gets written
+	// 特意留空（WithNoBuildDirective 的含义），于是什么都不写
+	require.Equal(t, "", PickGoBuildDirective("", true, "!sure_generate"))
+	// A stated directive beats the fallback regardless of which shape built the config
+	// 写明了的指令，不论配置是怎么造出来的都优先
+	require.Equal(t, "!other_tag", PickGoBuildDirective("!other_tag", false, "!sure_generate"))
+	require.Equal(t, "!other_tag", PickGoBuildDirective("!other_tag", true, "!sure_generate"))
+}
+
+// TestFormatGoBuildDirectiveStopsOnALineGoCannotRead checks a directive that renders into no build constraint halts the run instead of reaching the artifact
+//
+// A value that holds its own prefix without the space renders as "//go:build //go:build!x", which the parse step reads as a plain comment
+// The artifact formats, gets written, and go build then rejects the package holding it, so the misconfigured directive gets named at this point instead
+//
+// TestFormatGoBuildDirectiveStopsOnALineGoCannotRead 检查"渲染出来根本不是构建约束"的指令会把流程停住，而不是溜进产物
+//
+// 自带前缀却少个空格的值会渲染成 "//go:build //go:build!x"，在解析器眼里只是条普通注释
+// 产物照样格式化、照样落盘，然后 go build 把它所在的包否掉，所以就此把配错的指令指名道姓报出来
+func TestFormatGoBuildDirectiveStopsOnALineGoCannotRead(t *testing.T) {
+	require.Panics(t, func() {
+		FormatGoBuildDirective("//go:build!sure_generate")
+	})
+	require.Panics(t, func() {
+		FormatGoBuildDirective("!")
+	})
+}
+
 // TestMustKnownImportsAcceptsStatedPaths checks stated imports pass through
 // TestMustKnownImportsAcceptsStatedPaths 检查能追溯到扫描源文件或调用方登记的导入可以放行
 func TestMustKnownImportsAcceptsStatedPaths(t *testing.T) {
@@ -189,55 +222,88 @@ func writeProbeFile(t *testing.T, root string, name string) string {
 	return path
 }
 
-// TestDropOutputFileRemovesTheArtifact checks the named file leaves and the rest remain
-// TestDropOutputFileRemovesTheArtifact 检查被点名的文件离场，其余留下
-func TestDropOutputFileRemovesTheArtifact(t *testing.T) {
+// TestIsOutputFileNamesTheArtifactAndSparesTheRest checks the named file gets picked out and a sibling in the same root does not
+// TestIsOutputFileNamesTheArtifactAndSparesTheRest 检查被点名的文件会被认出来，而同目录里的邻居不受牵连
+func TestIsOutputFileNamesTheArtifactAndSparesTheRest(t *testing.T) {
 	root := t.TempDir()
 	sourcePath := writeProbeFile(t, root, "source.go")
 	outputPath := writeProbeFile(t, root, "sure.gen.go")
 
-	tuples := SourceMethodsTuples{{Path: sourcePath}, {Path: outputPath}}
-	kept := tuples.DropOutputFile(outputPath)
-
-	require.Len(t, kept, 1)
-	require.Equal(t, sourcePath, kept[0].Path)
+	require.True(t, IsOutputFile(outputPath, outputPath))
+	require.False(t, IsOutputFile(sourcePath, outputPath))
 }
 
-// TestDropOutputFileKeepsEachWhenPathIsBlank checks a blank output path drops nothing
+// TestIsOutputFileNamesNothingWhenPathIsBlank checks a blank output path names nothing
 // A blank path means the code goes to stdout, so no file gets overwritten
 //
-// TestDropOutputFileKeepsEachWhenPathIsBlank 检查输出路径为空时一个都不剔
+// TestIsOutputFileNamesNothingWhenPathIsBlank 检查输出路径为空时谁都不点名
 // 路径为空表示代码打到标准输出，没有任何文件会被覆写
-func TestDropOutputFileKeepsEachWhenPathIsBlank(t *testing.T) {
-	tuples := SourceMethodsTuples{{Path: "a.go"}, {Path: "b.go"}}
-	require.Len(t, tuples.DropOutputFile(""), 2)
+func TestIsOutputFileNamesNothingWhenPathIsBlank(t *testing.T) {
+	require.False(t, IsOutputFile("a.go", ""))
+	require.False(t, IsOutputFile("", "sure.gen.go"))
 }
 
-// TestDropOutputFileKeepsAnUnmatchedPath checks a file elsewhere stays in the scan
-// TestDropOutputFileKeepsAnUnmatchedPath 检查位于别处的文件仍留在扫描结果里
-func TestDropOutputFileKeepsAnUnmatchedPath(t *testing.T) {
+// TestIsOutputFileSparesAPathElsewhere checks a file in a distinct root remains untouched
+// TestIsOutputFileSparesAPathElsewhere 检查位于别处的文件不会被误认
+func TestIsOutputFileSparesAPathElsewhere(t *testing.T) {
 	root := t.TempDir()
 	sourcePath := writeProbeFile(t, root, "source.go")
 
-	tuples := SourceMethodsTuples{{Path: sourcePath}}
-	require.Len(t, tuples.DropOutputFile(filepath.Join(t.TempDir(), "sure.gen.go")), 1)
+	require.False(t, IsOutputFile(sourcePath, filepath.Join(t.TempDir(), "sure.gen.go")))
 }
 
-// TestDropOutputFileSeesPastSymlink checks one file reached two ways counts as one
+// TestIsOutputFileNamesTheArtifactBeforeItExists checks the match holds on a first run
 //
-// Comparing the two path strings alone would miss the hit and hand the artifact back
-// to the scan, which is how the import block of a past artifact gets handed down
+// The artifact has no need to exist yet, so os.Stat misses on it and the comparison rests on the paths alone
+// A run that missed here would read its own artifact back on the next pass
 //
-// # TestDropOutputFileSeesPastSymlink 检查同一个文件经两条路径抵达时仍算作同一个
+// TestIsOutputFileNamesTheArtifactBeforeItExists 检查首次生成时（产物还不存在）也认得出来。
+//
+// 首轮产物本来就还不存在，os.Stat 拿不到它，比较只能靠路径本身
+// 这里漏判的话，下一轮就会把自己上一轮的产物读回来
+func TestIsOutputFileNamesTheArtifactBeforeItExists(t *testing.T) {
+	root := t.TempDir()
+	outputPath := filepath.Join(root, "sure.gen.go")
+
+	require.NoFileExists(t, outputPath)
+	require.True(t, IsOutputFile(outputPath, outputPath))
+}
+
+// TestIsOutputFileSeesPastSymlink checks one file reached two ways counts as one
+//
+// Comparing the two path strings alone would miss the hit and hand the artifact back to the scan, which is how the import block of a past artifact gets handed down.
+//
+// TestIsOutputFileSeesPastSymlink 检查同一个文件经两条路径抵达时仍算作同一个。
 //
 // 只比路径字符串会漏判、把产物又交回扫描，上一轮产物的导入块正是这样被一代代传下去的
-func TestDropOutputFileSeesPastSymlink(t *testing.T) {
+func TestIsOutputFileSeesPastSymlink(t *testing.T) {
 	root := t.TempDir()
 	outputPath := writeProbeFile(t, root, "sure.gen.go")
 
 	linkRoot := filepath.Join(t.TempDir(), "linked")
 	require.NoError(t, os.Symlink(root, linkRoot))
 
-	tuples := SourceMethodsTuples{{Path: outputPath}}
-	require.Empty(t, tuples.DropOutputFile(filepath.Join(linkRoot, "sure.gen.go")))
+	require.True(t, IsOutputFile(outputPath, filepath.Join(linkRoot, "sure.gen.go")))
+}
+
+// TestCollectReceiverMethodsSkipsABrokenArtifact checks the scan gets past an artifact that cannot get parsed, since that is the run meant to replace it
+//
+// The parse beneath CollectReceiverMethods asserts, so reading the artifact would take down the one run holding the escape hatch. See sure.DirectiveSkipGenerate
+//
+// TestCollectReceiverMethodsSkipsABrokenArtifact 检查扫描能越过一个解析不了的产物，因为这一趟正是要来替换它的。
+//
+// CollectReceiverMethods 底下那步解析是带断言的，读它就等于把"手握退路的这一趟"搞挂。参见 sure.DirectiveSkipGenerate
+func TestCollectReceiverMethodsSkipsABrokenArtifact(t *testing.T) {
+	root := t.TempDir()
+
+	sourcePath := filepath.Join(root, "source.go")
+	require.NoError(t, os.WriteFile(sourcePath, []byte("package probe\n\nfunc (a *Probe) GetN() error { return nil }\n"), 0644))
+
+	outputPath := filepath.Join(root, "sure.gen.go")
+	require.NoError(t, os.WriteFile(outputPath, []byte("package probe\n\nfunc broken( {\n"), 0644))
+
+	tuples := CollectReceiverMethods(root, "Probe", outputPath)
+
+	require.Len(t, tuples, 1)
+	require.Equal(t, sourcePath, tuples[0].Path)
 }

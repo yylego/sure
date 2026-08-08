@@ -68,27 +68,36 @@ type StubGenConfig struct {
 	ImportOptions     *syntaxgo_ast.PackageImportOptions // Import configuration // 导入配置
 	OutputPath        string                             // Output file path // 输出文件路径
 	AllowFileCreation bool                               // Allow creating new file if not exists // 当文件不存在时允许创建新文件
-	GoBuildDirective  string                             // go:build directive for the generated file, blank writes none // 生成文件的 go:build 指令，留空则不写
+	GoBuildDirective  string                             // go:build directive for the generated file, blank falls back to sure.DirectiveSkipGenerate // 生成文件的 go:build 指令，留空则回退到 sure.DirectiveSkipGenerate
+
+	// States if the config settled the build constraint question, which a blank GoBuildDirective cannot show on its own
+	// Set via WithGoBuildDirective and WithNoBuildDirective, so a bare struct value leaves it false and picks up the default
+	// See utils.PickGoBuildDirective
+	//
+	// 配置是否就"构建约束"这件事表过态——光看 GoBuildDirective 是空串分不出来
+	// 由 WithGoBuildDirective 与 WithNoBuildDirective 置上，于是直接写结构体字面量时它为 false、从而吃到默认值
+	// 详见 utils.PickGoBuildDirective
+	directiveChosen bool
 }
 
 // NewStubGenConfig creates a StubGenConfig with the build constraint set
-// Use this shape, since a bare struct value leaves the constraint blank
+// A bare struct value reaches the same constraint through the fallback, so this shape states it up front instead of adding it
 //
-// The constraint counts here because the generated stubs and the test that makes
-// them share one package, so a broken artifact takes that test down with it.
+// The constraint counts here because the generated stubs and the test that makes them share one package, so a broken artifact takes that test down with it
 // See sure.DirectiveSkipGenerate
 //
 // NewStubGenConfig 创建已设好构建约束的 StubGenConfig
-// 优先用这种写法，因为直接写结构体字面量会让约束留空
+// 直接写结构体字面量的配置会经由兜底拿到同一条约束，这种写法只是把它当场写明、而非多给了什么
 //
-// 这里的约束很要紧：生成的存根与生成它的测试同住一个包，
-// 破损产物会把那个测试一并搞挂。参见 sure.DirectiveSkipGenerate
+// 这里的约束很要紧：生成的存根与生成它的测试同住一个包，破损产物会把那个测试一并搞挂
+// 参见 sure.DirectiveSkipGenerate
 func NewStubGenConfig(sourceRootPath string, targetPackageName string, outputPath string) *StubGenConfig {
 	return &StubGenConfig{
 		SourceRootPath:    sourceRootPath,
 		TargetPackageName: targetPackageName,
 		OutputPath:        outputPath,
 		GoBuildDirective:  sure.DirectiveSkipGenerate,
+		directiveChosen:   true,
 	}
 }
 
@@ -107,27 +116,27 @@ func (cfg *StubGenConfig) WithAllowFileCreation(allowFileCreation bool) *StubGen
 }
 
 // WithGoBuildDirective sets the go:build directive written into generated files
-// State a negated tag such as sure.DirectiveSkipGenerate, since a directive without
-// the leading "!" would drop the artifact from each standard build instead
+// State a negated tag such as sure.DirectiveSkipGenerate, since a directive without the leading "!" would drop the artifact from each standard build instead
 // WithGoBuildDirective 设置写入生成文件的 go:build 指令
-// 要写取反的标签（如 sure.DirectiveSkipGenerate），因为漏掉开头的 "!" 会反过来
-// 让产物在每次普通构建里都被排除掉
+// 要写取反的标签（如 sure.DirectiveSkipGenerate），因为漏掉开头的 "!" 会反过来让产物在每次普通构建里都被排除掉
 func (cfg *StubGenConfig) WithGoBuildDirective(goBuildDirective string) *StubGenConfig {
 	cfg.GoBuildDirective = goBuildDirective
+	cfg.directiveChosen = true
 	return cfg
 }
 
 // WithNoBuildDirective clears the directive so generated files state no constraint
-// Choosing this gives up the escape hatch: once a generated file stops compiling,
-// its package stops compiling, and the test inside cannot run to set it straight
+// This is the one route to a blank constraint, since a config that said nothing on the topic falls back to sure.DirectiveSkipGenerate
+// Choosing it gives up the escape hatch: once a generated file stops compiling, its package stops compiling, and the test inside cannot run to set it straight
 // See sure.DirectiveSkipGenerate
 //
 // WithNoBuildDirective 清除指令，使生成文件不带任何构建约束
-// 选它就等于放弃那道退路：生成文件一旦编译不过，它所在的包就编译不过，
-// 包里那个生成器测试也没法再跑起来修它
+// 这是让约束为空的唯一途径，因为压根没表过态的配置会回退到 sure.DirectiveSkipGenerate
+// 选它就等于放弃那道退路：生成文件一旦编译不过，它所在的包就编译不过，包里那个生成器测试也没法再跑起来修它
 // 参见 sure.DirectiveSkipGenerate
 func (cfg *StubGenConfig) WithNoBuildDirective() *StubGenConfig {
 	cfg.GoBuildDirective = ""
+	cfg.directiveChosen = true
 	return cfg
 }
 
@@ -156,19 +165,18 @@ func GenerateStubs(config *StubGenConfig, stubParams ...*StubParam) {
 	sourceMethodsTuples := make(utils.SourceMethodsTuples, 0)
 	for _, param := range stubParams {
 		typeName := syntaxgo_reflect.GetTypeV3(param.object).Name()
-		tuples := utils.CollectReceiverMethods(config.SourceRootPath, typeName)
+		tuples := utils.CollectReceiverMethods(config.SourceRootPath, typeName, config.OutputPath)
 		if len(tuples) == 0 {
 			// A stub set with no functions in it is almost sure a mistake, so speak
 			// up instead of writing a file that holds nothing besides its heading
 			// 一个函数都没有的存根集几乎肯定是哪里搞错了，出声说明，而不是默默写出个只剩文件头的文件
-			zaplog.LOG.Warn("No methods with this receiver type in the source root",
+			zaplog.LOG.Warn("No methods with this recv type in the source root",
 				zap.String("type", typeName),
 				zap.String("root", config.SourceRootPath))
 		}
 		sourceMethodsTuples = append(sourceMethodsTuples, tuples...)
 	}
-	// 排除即将被覆写的那个产物，免得它的导入被一轮轮传下去。详见 DropOutputFile
-	sourceImports := sourceMethodsTuples.DropOutputFile(config.OutputPath).MergeSourceImports()
+	sourceImports := sourceMethodsTuples.MergeSourceImports()
 
 	ptx := utils.NewPTX()
 	ptx.Println("// Code generated using sure/cls_stub_gen. DO NOT EDIT.")
@@ -177,7 +185,8 @@ func GenerateStubs(config *StubGenConfig, stubParams ...*StubParam) {
 	// shape can lock, which a build constraint undoes. See sure.DirectiveSkipGenerate
 	// 生成文件与生成它的测试同住一个包，这个格局会卡住；构建约束就是那把钥匙。
 	// 详见 sure.DirectiveSkipGenerate
-	if goBuildLine := utils.FormatGoBuildDirective(config.GoBuildDirective); goBuildLine != "" {
+	goBuildDirective := utils.PickGoBuildDirective(config.GoBuildDirective, config.directiveChosen, sure.DirectiveSkipGenerate)
+	if goBuildLine := utils.FormatGoBuildDirective(goBuildDirective); goBuildLine != "" {
 		ptx.Println()
 		ptx.Println(goBuildLine)
 		ptx.Println()
@@ -199,11 +208,15 @@ func GenerateStubs(config *StubGenConfig, stubParams ...*StubParam) {
 		ptx.Println(GenerateStubMethods(config, param))
 	}
 
-	var importOptions *syntaxgo_ast.PackageImportOptions
+	// Read what callers registered into a fresh set instead of writing into it, since the loop beneath adds one path from each stub param
+	// A config handed to a second run with fresh params would otherwise keep the first run's packages, which widens the set MustKnownImports treats as stated in silence — the guard against a guessed import goes slack
+	// GetPkgPaths flattens registered types and objects into paths beforehand
+	// 把调用方的登记读进一份新的集合，而不是往它里面写，因为下面那个循环每个存根参数加一条路径
+	// 同一份配置换一批参数跑第二趟，第一趟那些包还留在里面，等于把 MustKnownImports 认定的"已写明"名单悄悄放宽——那道拦截"猜出来的导入"的守卫就松了
+	// GetPkgPaths 已把登记的类型与对象摊平成路径
+	importOptions := syntaxgo_ast.NewPackageImportOptions()
 	if config.ImportOptions != nil {
-		importOptions = config.ImportOptions
-	} else {
-		importOptions = &syntaxgo_ast.PackageImportOptions{}
+		importOptions.AddPkgPaths(config.ImportOptions.GetPkgPaths())
 	}
 
 	for _, param := range stubParams {
@@ -220,8 +233,10 @@ func GenerateStubs(config *StubGenConfig, stubParams ...*StubParam) {
 	// 测量代码格式化时间
 	sinceTime := time.Now()
 
-	// Format code without extra import resolution to save time
-	// 格式化代码时不额外解析导入以节省时间
+	// Format the code, which runs goimports too: it prunes each import the code does not mention
+	// It can also add one it thinks the code wants — that guessed add is what MustKnownImports beneath catches
+	// 格式化代码，这一步会连 goimports 一起跑：代码里没提到的导入会被剪掉
+	// 它也可能把自认为该有的"猜着加"进来——下面的 MustKnownImports 拦的正是这种猜测
 	newSource := done.VAE(formatgo.FormatBytes(source)).Nice()
 
 	// An import in the output with no source file and no registration behind it
@@ -267,7 +282,7 @@ func GenerateStubMethods(cfg *StubGenConfig, stubParam *StubParam) string {
 
 	utils.MustRoot(cfg.SourceRootPath)
 
-	sourceMethodsTuples := utils.CollectReceiverMethods(cfg.SourceRootPath, objectType.Name())
+	sourceMethodsTuples := utils.CollectReceiverMethods(cfg.SourceRootPath, objectType.Name(), cfg.OutputPath)
 
 	// 源包的包名前缀：把方法里的源包类型（含 []T / map / func 等复合类型）限定到目标包。
 	// 从反射类型名（形如 "demo.Foo"）取包名段，而非 GetPkgNameV3——后者内部是 path.Base，

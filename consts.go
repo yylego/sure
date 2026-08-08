@@ -32,7 +32,8 @@ package sure
 // exclude each Go file there. A cls_stub_gen target package often has that shape, so
 // expect it; `go test -tags=sure_generate` aimed at one package keeps on going
 // regardless, which is what regeneration needs. Hence sure_pkg_gen, which emits
-// standalone packages that cannot lock, states no constraint.
+// standalone packages that cannot lock, leaves the constraint blank as its default,
+// and offers WithGoBuildDirective where an output does land somewhere that locks.
 //
 // 让破损产物无法卡住自身所在包的构建约束
 //
@@ -61,7 +62,8 @@ package sure
 // `go build -tags=sure_generate ./...` 会在那里报"构建约束排除了该处的每个 Go 文件"。
 // cls_stub_gen 的目标包常常就是这个形状，得有心理准备；
 // 而按包跑 `go test -tags=sure_generate` 照样跑得通，重新生成要的正是这个。
-// 因此 sure_pkg_gen（它生成的是不会卡住的独立新包）干脆不写这道约束。
+// 因此 sure_pkg_gen（它生成的是不会卡住的独立新包）默认留空不写这道约束，
+// 若产物确实落在会卡住的地方，可用 WithGoBuildDirective 主动写上。
 const (
 	// BuildTagGenerate is the tag to set when regenerating
 	// BuildTagGenerate 是重新生成时要带上的标签

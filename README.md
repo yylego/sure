@@ -84,7 +84,7 @@ if err != nil {
 
 data, err := AnotherOperation(result)
 if err != nil {
-    log.Printf("another operation failed: %v", err)
+    log.Printf("a second operation failed: %v", err)
     return err
 }
 ```
@@ -102,7 +102,7 @@ func ReadConfig(path string) (*Config, error)
 // Generated wrapping (Must mode)
 func (s *SureConfig) ReadConfig(path string) *Config
 
-// Usage - crashes on issues, no manual checks needed
+// Usage - crashes on issues, no hand-written checks needed
 config := sureConfig.ReadConfig("config.json")
 ```
 
@@ -116,12 +116,12 @@ The generated code handles assertions, enabling clean business logic.
 
 **Purpose**: Creates wrapping classes from existing objects, embedding assertion logic in each method.
 
-**Use Case**: When working with objects that have multiple methods returning issues, generate a wrapping class that handles all assertions.
+**Use Case**: When working with objects that have multiple methods returning issues, generate a wrapping class that handles each assertion.
 
 **How It Works**:
 
 1. Takes an existing struct/interface
-2. Analyzes all methods with issue returns
+2. Analyzes each method with issue returns
 3. Generates wrapping class with assertion methods
 4. Each wrapping method removes issue returns, adding assertion logic
 
@@ -311,7 +311,7 @@ import (
 sure_pkg_gen.GenerateSurePackage(
     sourceRoot,
     sure.MUST,
-    "original/package/path",
+    "source/package/path",
 )
 ```
 
@@ -320,7 +320,7 @@ sure_pkg_gen.GenerateSurePackage(
 ```go
 import "github.com/yylego/sure/cls_stub_gen"
 
-// Generate package-level wrapping
+// Generate package-scope wrapping
 stubConfig := &cls_stub_gen.StubGenConfig{
     SourceRootPath:    projectPath,
     TargetPackageName: "api",

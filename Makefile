@@ -1,6 +1,6 @@
 COVERAGE_DIR ?= .coverage.out
 
-# Regenerate every artifact. Each //go:generate directive above a gen_test.go states
+# Regenerate each artifact. Each //go:generate directive above a gen_test.go states
 # the tag that suits it, so a run gets through even when a broken artifact keeps its
 # package from compiling. See sure.DirectiveSkipGenerate
 # 重新生成全部产物。各 gen_test.go 顶上的 //go:generate 指令带着各自该用的标签，

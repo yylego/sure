@@ -54,7 +54,7 @@ func (j *Json) MustInt(args ...int) int {
 	case 1:
 		def = args[0]
 	default:
-		log.Panicf("MustInt() received too many arguments %d", len(args))
+		log.Panicf("MustInt() received excess arguments %d", len(args))
 	}
 
 	i, err := j.Int()
@@ -103,7 +103,7 @@ The `github.com/yylego/done` package can also solve the problem, but it requires
 Example usage:
 
 ```go
-defer func() { // This is an operation when closing db *gorm.DB, assume it is in a test case, where a temporary DB is created, and it can be closed like this after it ends
+defer func() { // This is an operation when closing db *gorm.DB, assume it is in a test case, which creates a scratch DB, and closing it once the case ends looks like this
     done.Done(done.VCE(db.DB()).Nice().Close())
 }()
 ```

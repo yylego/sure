@@ -84,7 +84,7 @@ if err != nil {
 
 data, err := AnotherOperation(result)
 if err != nil {
-    log.Printf("another operation failed: %v", err)
+    log.Printf("a second operation failed: %v", err)
     return err
 }
 ```
@@ -311,7 +311,7 @@ import (
 sure_pkg_gen.GenerateSurePackage(
     sourceRoot,
     sure.MUST,
-    "original/package/path",
+    "source/package/path",
 )
 ```
 

@@ -54,7 +54,7 @@ func (j *Json) MustInt(args ...int) int {
 	case 1:
 		def = args[0]
 	default:
-		log.Panicf("MustInt() received too many arguments %d", len(args))
+		log.Panicf("MustInt() received excess arguments %d", len(args))
 	}
 
 	i, err := j.Int()

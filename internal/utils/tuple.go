@@ -29,7 +29,7 @@ type SourceMethodsTuples []*SourceMethodsTuple
 
 // GetReceiverVariableName extracts the method context variable name
 // Scans method list to find first context name
-// Skips the blank identifier "_" (it cannot serve as a struct field or value)
+// Skips the blank name "_" (it cannot serve as a struct field / value)
 // Returns blank string when no context is found
 //
 // GetReceiverVariableName 从方法中提取接收器变量名

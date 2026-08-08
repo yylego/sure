@@ -18,8 +18,8 @@ func GetPkgPath() string {
 
 // GetPkgName returns the package name of the sure package
 // Reads it from the reflected type name (e.g. "sure.ErrorHandlingMode"), which
-// stays correct even for versioned module paths where the last path segment is
-// "v2" rather than the real package name
+// stays correct even on versioned module paths whose trailing path segment is
+// "v2" instead of the genuine package name
 //
 // GetPkgName 返回 sure 包的包名
 // 从反射的类型名（形如 "sure.ErrorHandlingMode"）取包名段；

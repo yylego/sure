@@ -121,8 +121,8 @@ func collectSignatureQualifiers(methodList []*ast.FuncDecl) map[string]bool {
 			continue
 		}
 		ast.Inspect(methodFunc.Type, func(node ast.Node) bool {
-			if selectorExpr, ok := node.(*ast.SelectorExpr); ok {
-				if ident, ok := selectorExpr.X.(*ast.Ident); ok {
+			if selectorNode, ok := node.(*ast.SelectorExpr); ok {
+				if ident, ok := selectorNode.X.(*ast.Ident); ok {
 					qualifiers[ident.Name] = true
 				}
 			}
@@ -132,86 +132,94 @@ func collectSignatureQualifiers(methodList []*ast.FuncDecl) map[string]bool {
 	return qualifiers
 }
 
-// DropOutputFile leaves out the scan hit whose file is the artifact about to get
-// written, and returns the rest untouched
+// IsOutputFile tells if a scanned path is the artifact about to get written
 //
-// A codegen aims at the same place it writes into, so a past artifact shows up in
-// its own scan. Reading it back matters most with imports: the artifact's import
-// block would reach the next artifact, so a path that slipped in once would keep
-// being handed down, and would look established to each check downstream. Naming
-// the one output file breaks that loop, and leaves the output of protoc-gen-go,
-// mockgen and such wide open to a scan, since those get wrapped on purpose.
+// A codegen aims at the same place it writes into, so a past artifact shows up in its own scan.
+// The scan has to leave it out on three counts, and the third explains the point of asking this ahead of each read:
 //
-// DropOutputFile 把"即将被写入的那个产物文件"从扫描结果里剔掉，其余原样返回
+// Imports. The artifact's import block would reach the next artifact, so a path that slipped in once would keep being handed down, and would look established to each check downstream.
+//
+// Methods. The artifact holds wrapping methods on the exact type being wrapped, so reading it back wraps the wrapping.
+// Filtering those on name gets close, yet a name that a past run wrote and this run stopped stating slips through.
+//
+// Parsing. A broken artifact cannot get parsed, and the run that parses it dies before it can write the replacement — the exact deadlock the build constraint exists to break.
+// Skipping the file ahead of the read keeps the escape hatch open.
+//
+// Naming the one output file leaves the output of protoc-gen-go, mockgen and such wide open to a scan, since those get wrapped on purpose.
+//
+// IsOutputFile 判断某个被扫描到的路径是不是"即将被写入的那个产物文件"
 //
 // 生成器所指的目录同时也是它写入的目录，于是上一轮的产物会出现在自己的扫描结果里。
-// 把它读回来这件事，对导入影响最大：产物的导入块会进入下一份产物，
-// 于是某次混进去的路径会被一路传承下去，而且在后续每一道检查眼里都显得理所当然。
-// 点名那一个输出文件就能斩断这个循环，同时让 protoc-gen-go、mockgen 之类的产物照常可扫——
-// 那些本来就是拿来包装的。
-func (mts SourceMethodsTuples) DropOutputFile(outputPath string) SourceMethodsTuples {
-	if outputPath == "" {
-		return mts
+// 扫描必须把它排除掉，理由有三条，而第三条正是"要在读文件之前就问这个问题"的原因：
+//
+// 导入：产物的导入块会进入下一份产物，于是某次混进去的路径会被一路传承下去，而且在后续每一道检查眼里都显得理所当然。
+//
+// 方法：产物里带着"针对被包装类型"的包装方法，读回来就等于给包装再包一层。
+// 按方法名去滤能挡住大半，但"上一轮写过、这一轮不再声明"的那个名字会漏过去。
+//
+// 解析：破损产物根本解析不了，而解析它的那一趟会先崩掉、来不及写出替换版本——这正是构建约束要解开的那个僵局。
+// 在读之前就跳过这个文件，才算真把退路留住。
+//
+// 点名那一个输出文件，同时让 protoc-gen-go、mockgen 之类的产物照常可扫——那些本来就是拿来包装的。
+func IsOutputFile(scanPath string, outputPath string) bool {
+	if outputPath == "" || scanPath == "" {
+		return false
 	}
 	absOutputPath, err := filepath.Abs(outputPath)
 	if err != nil {
 		panic(erero.WithMessagef(err, "cannot resolve output path %s", outputPath))
 	}
-	// Stat can miss, since the output file has no need to exist on a first run
-	// Stat 可能拿不到：首次生成时输出文件本来就还不存在
-	outputInfo, outputStated := os.Stat(absOutputPath)
-
-	kept := make(SourceMethodsTuples, 0, len(mts))
-	for _, tuple := range mts {
-		absTuplePath, err := filepath.Abs(tuple.Path)
-		if err != nil {
-			panic(erero.WithMessagef(err, "cannot resolve scanned path %s", tuple.Path))
-		}
-		// os.SameFile sees past a symlink, where comparing the two path strings
-		// alone would miss the hit and hand the artifact back to the scan
-		// os.SameFile 能看穿软链目录；只比路径字符串的话会漏判，
-		// 于是产物又被当成普通源文件扫了进去
-		if outputStated == nil {
-			if tupleInfo, err := os.Stat(absTuplePath); err == nil && os.SameFile(outputInfo, tupleInfo) {
-				continue
-			}
-		} else if absTuplePath == absOutputPath {
-			continue
-		}
-		kept = append(kept, tuple)
+	absScanPath, err := filepath.Abs(scanPath)
+	if err != nil {
+		panic(erero.WithMessagef(err, "cannot resolve scanned path %s", scanPath))
 	}
-	return kept
+	if absScanPath == absOutputPath {
+		return true
+	}
+	// Past the plain path match, os.SameFile sees past a symlink, where two paths name one file
+	// Stat can miss on each side, since the artifact has no need to exist on a first run
+	// Nothing to compare then, so the path match above stands as the verdict
+	// 路径字面量之外，os.SameFile 还能看穿软链——同一个文件被两条路径写出来
+	// 两边的 Stat 都可能拿不到：首次生成时产物本来就还不存在
+	// 那就无从比较，上面那次路径比对的结果即为答案
+	outputInfo, err := os.Stat(absOutputPath)
+	if err != nil {
+		return false
+	}
+	scanInfo, err := os.Stat(absScanPath)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(outputInfo, scanInfo)
 }
 
 // MergeSourceImports gathers the imports of each scanned file into one set
 // Keeps an aliased import when its alias shows up in the transcribed signatures
 // Collapses exact duplicates and stops the run when one alias names two paths
 //
-// The alias screen comes first because an alias is a plain name, so a glance tells
-// if a signature uses it. An unused alias adds dead weight, and would let two files
-// that gave one alias to two paths halt a run that mentions no such import. Past the
-// screen, a clash means two aliases that both do reach a signature and in fact
-// cannot coexist, and halting is then the right move.
+// The alias screen comes first because an alias is a plain name, so a glance tells if a signature uses it
+// An unused alias adds dead weight, and would let two files that gave one alias to two paths halt a run that mentions no such import
+// Past the screen, a clash means two aliases that both do reach a signature and in fact cannot coexist, and halting is then the right move
 //
-// A plain import gives nothing to judge on, since a path does not state its package
-// name, so each one gets taken and goimports prunes it. Two clashes remain unseen
-// here: two plain imports whose packages share a name, and an alias landing on the
-// default name of a second import. Both show up once the build names the symbols
-// that collide, and the generated file states a build constraint, so a fresh run
-// remains within reach.
+// A plain import gives nothing to judge on, since a path does not state its package name, so each one gets taken and goimports prunes it
+// Two clashes remain unseen here: two plain imports whose packages share a name, and an alias landing on the default name of a second import
+// Both show up once the build names the symbols that collide, and both remain out of reach of MustKnownImports, since each path involved is one a scanned source states
+// Where the artifact carries a build constraint (sure_cls_gen, cls_stub_gen) the package compiles even so, and a fresh run replaces the file
+// sure_pkg_gen writes standalone packages and states no constraint, so there the fix is to give one of the two sources an alias
 //
 // MergeSourceImports 把每个被扫描文件的导入汇成一组
 // 带别名的导入，只在别名确实出现在抄走的签名里时才留下
 // 合并完全相同的项；当同一别名指向两条路径时把流程停住
 //
-// 别名这道筛先做，因为别名就是个普通名字，签名里用没用一眼可知。
-// 没用到的别名是累赘，还会让"两个文件把同一别名给了不同路径"这种
-// 与本次生成毫不相干的情况白白把流程拦下来。过了这道筛还撞上的，
-// 就是两个都真的进了签名、实际上没法共存的别名，那时停住才是对的。
+// 别名这道筛先做，因为别名就是个普通名字，签名里用没用一眼可知
+// 没用到的别名是累赘，还会让"两个文件把同一别名给了不同路径"这种与本次生成毫不相干的情况白白把流程拦下来
+// 过了这道筛还撞上的，就是两个都真的进了签名、实际上没法共存的别名，那时停住才是对的
 //
-// 没写别名的导入无从判断，因为路径并不写明自己的包名，于是一律取走、交给 goimports 剪。
-// 有两类冲突在这儿看不见：两条没写别名而包名相同的；以及一条别名恰好撞上第二条导入的默认包名。
-// 这两类都会在编译点名撞车的符号时显现，而生成文件带着构建约束，重新跑一遍随时够得着。
+// 没写别名的导入无从判断，因为路径并不写明自己的包名，于是一律取走、交给 goimports 剪
+// 有两类冲突在这儿看不见：两条没写别名而包名相同的；以及一条别名恰好撞上第二条导入的默认包名
+// 这两类都会在编译点名撞车的符号时显现，而 MustKnownImports 也拦不住它们——牵涉的每条路径都是某个被扫描源文件写明过的
+// 产物带着构建约束时（sure_cls_gen、cls_stub_gen），包照样能编译，重新跑一遍就把文件换掉了
+// sure_pkg_gen 生成的是独立新包、不写约束，那边的解法是给两个源文件之一加上别名
 func (mts SourceMethodsTuples) MergeSourceImports() SourceImports {
 	merged := make(SourceImports, 0)
 	seenPairs := make(map[SourceImport]bool)
@@ -290,13 +298,13 @@ func (sourceImports SourceImports) Paths() []string {
 //
 // 宁可不写，也别写出一个编译不过的文件：生成器测试往往就住在它要写入的那个包里，
 // 破损产物会把唯一能替换它的那个测试一起搞挂
-func MustKnownImports(source []byte, knownPaths []string) {
+func MustKnownImports(sourceCode []byte, knownPaths []string) {
 	knownSet := make(map[string]bool, len(knownPaths))
 	for _, knownPath := range knownPaths {
 		knownSet[knownPath] = true
 	}
 
-	astBundle, err := syntaxgo_ast.NewAstBundleV1(source)
+	astBundle, err := syntaxgo_ast.NewAstBundleV1(sourceCode)
 	if err != nil {
 		panic(erero.WithMessage(err, "cannot parse generated code to check its imports"))
 	}
@@ -322,7 +330,7 @@ func MustKnownImports(source []byte, knownPaths []string) {
 	}
 	if len(unknownPaths) > 0 {
 		panic(erero.Errorf(
-			"refusing to write generated code: import path(s) %s came from guesswork, since no scanned source and no registration states them; state each one via ImportOptions.AddPkgPath or ImportOptions.AddInferredObject",
+			"refusing to write generated code: import path(s) %s came from guesswork, since no scanned source and no registration states them; state each one via ImportOptions.AddPkgPath / ImportOptions.AddInferredObject",
 			strings.Join(unknownPaths, ", ")))
 	}
 }

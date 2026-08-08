@@ -44,7 +44,7 @@ func TestIsFileExistAndRootExist(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, hasFile)
 
-	fileOnBase, err := IsFileExist(base) // a directory is not a file
+	fileOnBase, err := IsFileExist(base) // a root is not a file
 	require.NoError(t, err)
 	require.False(t, fileOnBase)
 
@@ -56,7 +56,7 @@ func TestIsFileExistAndRootExist(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, hasBase)
 
-	baseOnFile, err := IsRootExist(onePath) // a file is not a directory
+	baseOnFile, err := IsRootExist(onePath) // a file is not a root
 	require.NoError(t, err)
 	require.False(t, baseOnFile)
 }

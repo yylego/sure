@@ -109,6 +109,13 @@ func GenerateSurePackageFiles(cfg *SurePackageGenConfig) {
 			ptx := utils.NewPTX()
 			ptx.Println("// Code generated using sure/sure_pkg_gen. DO NOT EDIT.")
 			ptx.Println("// This file was auto generated via github.com/yylego/sure")
+			// Blank unless calling code asked to have one, since a standalone package cannot lock. See the field on SurePackageGenConfig
+			// 除非调用方主动要，否则这里是空的——独立新包卡不住自己。详见 SurePackageGenConfig 上那个字段
+			if goBuildLine := utils.FormatGoBuildDirective(cfg.GoBuildDirective); goBuildLine != "" {
+				ptx.Println()
+				ptx.Println(goBuildLine)
+				ptx.Println()
+			}
 			ptx.Println("// Generated from:", genPosFuncMark)
 			ptx.Println("// ========== SURE:DO-NOT-EDIT-SECTION:END ==========")
 			ptx.Println()
@@ -182,14 +189,14 @@ func GenerateSureFunctions(cfg *SurePackageGenConfig, absPath string) []string {
 		if astFunc.Recv != nil { // methods are not wrapped at package scope // 方法不在包作用域包装
 			continue
 		}
-		if !utils.C0IsUppercase(astFunc.Name.Name) { // only exported functions // 仅处理导出函数
+		if !utils.C0IsUppercase(astFunc.Name.Name) { // exported functions alone // 仅处理导出函数
 			continue
 		}
 		results := parseFunctionReturnFields(sourceCode, astFunc)
 		functionCode := makeFunctionCode(sourceCode, packageName, astFunc, results, cfg.ErrorHandlingMode, cfg.HandlerFuncReference)
 		functionCodes = append(functionCodes, functionCode)
 	}
-	zaplog.LOG.Debug("Generated wrapper functions",
+	zaplog.LOG.Debug("Generated wrapping functions",
 		zap.String("path", absPath),
 		zap.Int("generated", len(functionCodes)))
 	return functionCodes
@@ -214,8 +221,8 @@ func makeFunctionCode(
 
 	var newFunctionCode = "func " + astFunc.Name.Name
 	if astFunc.Type.TypeParams != nil {
-		// 类型参数列表：约束若引用源包的导出类型（如 [T Number]）也要加包前缀，
-		// 不能像旧写法那样整段原样拷贝，否则生成包里 Number 未定义。
+		// 类型参数列表：约束若引用源包的导出类型（如 [T Numeric]）也要加包前缀，
+		// 不能像旧写法那样整段原样拷贝，否则生成包里 Numeric 未定义。
 		var typeParamTexts []string
 		for _, field := range astFunc.Type.TypeParams.List {
 			names := make([]string, 0, len(field.Names))
@@ -357,7 +364,7 @@ func makeFunctionCode(
 	return newFunctionCode
 }
 
-// invokeArgName renders a parameter name for the call site, spreading variadic args with "..."
+// invokeArgName renders an input name at the invocation site, spreading variadic args with "..."
 //
 // invokeArgName 渲染调用侧的参数名，可变参数用 "..." 展开
 func invokeArgName(name string, variadic bool) string {
@@ -369,7 +376,7 @@ func invokeArgName(name string, variadic bool) string {
 
 // uniqueName returns base when it is free, otherwise base with the smallest
 // numeric suffix that is not yet taken. Keeps synthesized names (arg/res/err)
-// from clashing with real parameter names inside the generated wrapper.
+// from clashing with genuine input names inside the generated wrapping.
 //
 // uniqueName 在 base 未被占用时原样返回，否则加最小的、尚未占用的数字后缀。
 // 用于让合成名（arg/res/err）不与包装函数里真实的形参名撞车。

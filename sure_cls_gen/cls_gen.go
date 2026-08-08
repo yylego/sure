@@ -31,7 +31,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// ClassGenConfig contains configuration for class generation
+// ClassGenConfig contains the configuration of class generation
 // Specifies generation options, package name, imports and output path
 // Combines settings needed to generate assertion-wrapped classes
 //
@@ -58,6 +58,12 @@ func GenerateClasses(cfg *ClassGenConfig, objects ...any) {
 	must.Nice(cfg.OutputPath)
 	utils.MustRoot(cfg.ClassGenOptions.SourceRootPath)
 
+	// The scan has to leave out the artifact about to get overwritten, and the path to it lives on the enclosing config while the scan runs off ClassGenOptions
+	// State it here so the scan down in GenerateClassWithErrorHandlingMode reaches it. See utils.IsOutputFile
+	// 扫描要绕开即将被覆写的那个产物，而它的路径在外层配置上、扫描却是照 ClassGenOptions 走的
+	// 在这里写上，好让 GenerateClassWithErrorHandlingMode 里那趟扫描够得着。详见 utils.IsOutputFile
+	cfg.ClassGenOptions.outputPath = cfg.OutputPath
+
 	// One scan up front gathers the imports of each source file: signatures get
 	// transcribed as text, so the types inside need a stated origin. This repeats
 	// the scan inside GenerateClassWithErrorHandlingMode, and buys leaving that
@@ -70,19 +76,18 @@ func GenerateClasses(cfg *ClassGenConfig, objects ...any) {
 	sourceMethodsTuples := make(utils.SourceMethodsTuples, 0)
 	for _, object := range objects {
 		typeName := reflect.TypeOf(object).Name()
-		tuples := utils.CollectReceiverMethods(cfg.ClassGenOptions.SourceRootPath, typeName)
+		tuples := utils.CollectReceiverMethods(cfg.ClassGenOptions.SourceRootPath, typeName, cfg.OutputPath)
 		if len(tuples) == 0 {
 			// A wrapping class with no methods in it is almost sure a mistake, so
 			// speak up instead of writing such a class in silence
 			// 一个方法都没有的包装类几乎肯定是哪里搞错了，出声说明，而不是默默写出这么个类
-			zaplog.LOG.Warn("No methods with this receiver type in the source root",
+			zaplog.LOG.Warn("No methods with this recv type in the source root",
 				zap.String("type", typeName),
 				zap.String("root", cfg.ClassGenOptions.SourceRootPath))
 		}
 		sourceMethodsTuples = append(sourceMethodsTuples, tuples...)
 	}
-	// 排除即将被覆写的那个产物，免得它的导入被一轮轮传下去。详见 DropOutputFile
-	sourceImports := sourceMethodsTuples.DropOutputFile(cfg.OutputPath).MergeSourceImports()
+	sourceImports := sourceMethodsTuples.MergeSourceImports()
 
 	ptx := utils.NewPTX()
 	ptx.Println("// Code generated using sure/sure_cls_gen. DO NOT EDIT.")
@@ -92,7 +97,8 @@ func GenerateClasses(cfg *ClassGenConfig, objects ...any) {
 	// with WithNoBuildDirective. See sure.DirectiveSkipGenerate
 	// 生成文件与生成它的测试同住一个包，这个格局会卡住；构建约束就是那把钥匙。
 	// 默认带上，可用 WithNoBuildDirective 去掉。详见 sure.DirectiveSkipGenerate
-	if goBuildLine := utils.FormatGoBuildDirective(cfg.ClassGenOptions.GoBuildDirective); goBuildLine != "" {
+	goBuildDirective := utils.PickGoBuildDirective(cfg.ClassGenOptions.GoBuildDirective, cfg.ClassGenOptions.directiveChosen, sure.DirectiveSkipGenerate)
+	if goBuildLine := utils.FormatGoBuildDirective(goBuildDirective); goBuildLine != "" {
 		ptx.Println()
 		ptx.Println(goBuildLine)
 		ptx.Println()
@@ -114,11 +120,15 @@ func GenerateClasses(cfg *ClassGenConfig, objects ...any) {
 		ptx.Println(GenerateClassCodeWithErrorHandling(cfg.ClassGenOptions, object))
 	}
 
-	var importOptions *syntaxgo_ast.PackageImportOptions
+	// Read what callers registered into a fresh set instead of writing into it, since the lines beneath add paths
+	// A config handed to more than one run would otherwise keep on collecting those, which widens the set MustKnownImports treats as stated in silence — the guard against a guessed import goes slack
+	// GetPkgPaths flattens registered types and objects into paths beforehand
+	// 把调用方的登记读进一份新的集合，而不是往它里面写，因为下面几行会往里加路径
+	// 同一份配置跑第二趟就会一直累积，等于把 MustKnownImports 认定的"已写明"名单悄悄放宽——那道拦截"猜出来的导入"的守卫就松了
+	// GetPkgPaths 已把登记的类型与对象摊平成路径
+	importOptions := syntaxgo_ast.NewPackageImportOptions()
 	if cfg.ImportOptions != nil {
-		importOptions = cfg.ImportOptions
-	} else {
-		importOptions = &syntaxgo_ast.PackageImportOptions{}
+		importOptions.AddPkgPaths(cfg.ImportOptions.GetPkgPaths())
 	}
 	if cfg.ClassGenOptions.ErrorHandlerFuncName != "" {
 		zaplog.LOG.Debug("Using custom exception handling function", zap.String("func", cfg.ClassGenOptions.ErrorHandlerFuncName))
@@ -136,8 +146,10 @@ func GenerateClasses(cfg *ClassGenConfig, objects ...any) {
 	// 测量代码格式化时间
 	sinceTime := time.Now()
 
-	// Format code without extra import resolution to save time
-	// 格式化代码时不额外解析导入以节省时间
+	// Format the code, which runs goimports too: it prunes each import the code does not mention
+	// It can also add one it thinks the code wants — that guessed add is what MustKnownImports beneath catches
+	// 格式化代码，这一步会连 goimports 一起跑：代码里没提到的导入会被剪掉
+	// 它也可能把自认为该有的"猜着加"进来——下面的 MustKnownImports 拦的正是这种猜测
 	newSource := done.VAE(formatgo.FormatBytes(source)).Nice()
 
 	// An import in the output with no source file and no registration behind it
@@ -195,7 +207,7 @@ func GenerateClassWithErrorHandlingMode(cfg *ClassGenOptions, object any, errorH
 		must.True(errorHandlingMode == sure.MUST || errorHandlingMode == sure.SOFT)
 	}
 
-	sourceMethodsTuples := utils.CollectReceiverMethods(cfg.SourceRootPath, objectType.Name())
+	sourceMethodsTuples := utils.CollectReceiverMethods(cfg.SourceRootPath, objectType.Name(), cfg.outputPath)
 
 	// 接收者变量名：优先用配置值，否则用源方法探测到的名字，再退到 "T"。
 	// 用局部变量而非回写 cfg.ReceiverVariableName，避免对入参的意外副作用
@@ -218,9 +230,21 @@ func GenerateClassWithErrorHandlingMode(cfg *ClassGenOptions, object any, errorH
 		methodList := sourceMethodsTuple.MethodList
 		for _, methodFunc := range methodList {
 			methodName := syntaxgo_astnode.GetText(sourceCode, methodFunc.Name)
-			if utils.In(methodName, []string{string(sure.MUST), string(sure.SOFT)}) {
+			// Leave out the mode entrances a past run wrote (Must/Soft/Omit), so a wrapping does not get wrapped
+			// Naming each mode sure states, and not the modes this run happens to want, counts when the two sets diverge
+			// A run narrowed down to Must alone would otherwise treat a stale Omit as source and invoke a class it stopped generating
+			// The scan leaves out this run's own artifact beforehand (utils.IsOutputFile), so this guard is what stands between a class and the artifacts of sibling runs sharing the source root
+			// 把上一轮写下的模式入口（Must/Soft/Omit）排除掉，免得给包装再包一层
+			// 这里点名的是 sure 声明的全部模式、而非本轮恰好要生成的那几个——两者不一致时才见分晓
+			// 缩到只剩 Must 的那一轮，会把残留的 Omit 当成源方法，写出一句调用早已不再生成的类
+			// 本轮自己的产物在扫描阶段就已被绕开（utils.IsOutputFile），因此这道守卫挡的是"共用同一源目录的邻居生成器留下的产物"
+			if utils.In(sure.ErrorHandlingMode(methodName), sure.ErrorHandlingModes()) {
 				continue
 			}
+			// ErrorHandlingMode is a plain string type, so calling code can state a mode of its own
+			// Such a mode sits outside the set above, and its entrance belongs out of the wrapping just the same
+			// ErrorHandlingMode 就是个字符串类型，调用方可以自定义模式
+			// 那种模式不在上面那个集合里，但它的入口方法同样不该被包装
 			if utils.In(sure.ErrorHandlingMode(methodName), cfg.ErrorHandlingModes) {
 				continue
 			}

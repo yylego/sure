@@ -99,7 +99,7 @@ func IsRootExist(path string) (bool, error) {
 		if os.IsNotExist(err) {
 			return false, nil // Path does not exist // 路径不存在
 		}
-		return false, erero.Wro(err) // Other errors // 其他错误
+		return false, erero.Wro(err) // Remaining errors // 其他错误
 	}
 	return info.IsDir(), nil
 }
@@ -117,7 +117,7 @@ func IsFileExist(path string) (bool, error) {
 		if os.IsNotExist(err) {
 			return false, nil // Path does not exist // 路径不存在
 		}
-		return false, erero.Wro(err) // Other errors // 其他错误
+		return false, erero.Wro(err) // Remaining errors // 其他错误
 	}
 	return !info.IsDir(), nil
 }
@@ -134,9 +134,9 @@ func MustWriteIntoPath(path string, s string) {
 	done.Done(os.WriteFile(path, []byte(s), 0644))
 }
 
-// MustLs reads root and returns entry names
+// MustLs reads root and returns the names inside
 // Panics on read exception to ensure operation succeeds
-// Returns slice of entry names in the root
+// Returns a slice of the names inside the root
 //
 // MustLs 读取根目录并返回条目名称
 // 读取异常时 panic 以确保操作成功
@@ -150,9 +150,9 @@ func MustLs(root string) (names []string) {
 	return
 }
 
-// C0IsUppercase checks if first character is uppercase
-// Returns true when string starts with uppercase letter
-// Returns false when string is blank or starts with lowercase
+// C0IsUppercase checks if the leading rune is uppercase
+// Returns true when the string starts with an uppercase rune
+// Returns false when the string is blank / starts with lowercase
 //
 // C0IsUppercase 检查首字符是否为大写
 // 当字符串以大写字母开头时返回 true
@@ -167,7 +167,7 @@ func C0IsUppercase(s string) bool {
 
 // SetDoubleQuotes wraps string with double quotes
 // Used to format import paths in generated code
-// Returns quoted string ready to insert into code
+// Returns a quoted string fit to insert into code
 //
 // SetDoubleQuotes 用双引号包裹字符串
 // 用于格式化生成代码中的导入路径
@@ -178,8 +178,8 @@ func SetDoubleQuotes(s string) string {
 
 // GetGenPosFuncMark gets position information to trace code generation
 // Returns formatted string showing source file and function that triggered generation
-// Uses runtime.Caller to walk up stack using specified frame count
-// Returns empty string when position information cannot be determined
+// Uses runtime.Caller to walk up the stack with the stated frame count
+// Returns a blank string when position information cannot be determined
 //
 // GetGenPosFuncMark 获取调用位置信息，用于追踪代码生成
 // 返回格式化字符串，显示触发生成的源文件和函数
@@ -193,7 +193,7 @@ func GetGenPosFuncMark(skip int) string {
 		return ""
 	}
 
-	// Extract just filename, not full path
+	// Extract just the file name, not the whole path
 	// 只提取文件名而不是完整路径
 	filename := filepath.Base(file)
 
@@ -202,7 +202,7 @@ func GetGenPosFuncMark(skip int) string {
 		return filename
 	}
 
-	// Extract just function name, not full package path
+	// Extract just the function name, not the whole package path
 	// 只提取函数名，不包含完整的包路径
 	funcName := filepath.Base(fn.Name())
 	return fmt.Sprintf("%s:%d -> %s", filename, line, funcName)

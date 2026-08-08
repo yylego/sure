@@ -18,8 +18,23 @@ type SurePackageGenConfig struct {
 	NewPkgName           string                 // New package name (auto-generated when not set) // 新包名（未设置时自动生成）
 	OutputRoot           string                 // Output root path // 输出根路径
 
-	// genPosFuncMark records the caller position captured at a public entry, so
-	// the "Generated from:" trace stays correct regardless of which entry is used.
+	// go:build directive of the generated files, blank writes none
+	//
+	// Blank is the default here, unlike sure_cls_gen and cls_stub_gen, and the shape of the output explains it
+	// Those two write into the package holding the wrapped code, alongside the test that regenerates, so a broken artifact keeps that test from running and the constraint is what breaks the lock
+	// This codegen writes a standalone sibling package while the test that drives it sits in the source package, so a broken artifact leaves the codegen reachable and there is nothing to unlock
+	// State one even so, via WithGoBuildDirective, where the output lands somewhere that can lock. See sure.DirectiveSkipGenerate
+	//
+	// 生成文件的 go:build 指令，留空则不写
+	//
+	// 这里默认留空，与 sure_cls_gen、cls_stub_gen 不同，原因在产物的位置
+	// 那两个把产物写进"被包装代码所在的包"，与负责重新生成的测试同住，于是产物一坏那个测试就跑不起来，得靠约束解锁
+	// 本生成器写的是独立的兄弟包，而驱动它的测试留在源包里，产物坏了也不妨碍生成器再跑，没有锁可解
+	// 若你的输出落在会卡住的地方，仍可用 WithGoBuildDirective 主动写上。参见 sure.DirectiveSkipGenerate
+	GoBuildDirective string
+
+	// genPosFuncMark records the calling position captured at a public entrance, so
+	// the "Generated from:" trace stays correct regardless of which entrance is used.
 	// genPosFuncMark 记录公共入口处捕获的调用位置，让"Generated from:"追踪行
 	// 无论从哪个入口进入都指向正确的用户调用点。
 	genPosFuncMark string
@@ -125,5 +140,31 @@ func (c *SurePackageGenConfig) WithNewPkgName(newPkgName string) *SurePackageGen
 // 返回自身以支持方法链式调用
 func (c *SurePackageGenConfig) WithOutputRoot(outputRoot string) *SurePackageGenConfig {
 	c.OutputRoot = outputRoot
+	return c
+}
+
+// WithGoBuildDirective sets the go:build directive written into generated files
+// State a negated tag such as sure.DirectiveSkipGenerate, since a directive without the leading "!" would drop the artifact from each standard build instead
+// Blank is the default here, so this is opt-in — the field explains how this codegen stands apart from the two beside it
+// Returns self to allow method chaining
+//
+// WithGoBuildDirective 设置写入生成文件的 go:build 指令
+// 要写取反的标签（如 sure.DirectiveSkipGenerate），因为漏掉开头的 "!" 会反过来让产物在每次普通构建里都被排除掉
+// 这里默认留空，所以这是个主动开关——本生成器为何与另外两个不同，见该字段的说明
+// 返回自身以允许方法链式调用
+func (c *SurePackageGenConfig) WithGoBuildDirective(goBuildDirective string) *SurePackageGenConfig {
+	c.GoBuildDirective = goBuildDirective
+	return c
+}
+
+// WithNoBuildDirective clears the directive so generated files state no constraint
+// Matches the default, and serves a chain that set one up above
+// Returns self to allow method chaining
+//
+// WithNoBuildDirective 清除指令，使生成文件不带任何构建约束
+// 与默认一致，供"链条上游已经设过"的情形使用
+// 返回自身以允许方法链式调用
+func (c *SurePackageGenConfig) WithNoBuildDirective() *SurePackageGenConfig {
+	c.GoBuildDirective = ""
 	return c
 }

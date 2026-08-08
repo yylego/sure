@@ -43,7 +43,27 @@ type ClassGenOptions struct {
 	ReceiverVariableName string                   // Method context variable name (e.g., 'a' in func (a *A)) // 方法中的接收器变量名（例如，func (a *A) 中的 'a'）
 	ErrorHandlerFuncName string                   // Custom error handling function name // 自定义错误处理函数名
 	ErrorHandlingModes   []sure.ErrorHandlingMode // Error handling modes to generate // 要生成的错误处理模式
-	GoBuildDirective     string                   // go:build directive for the generated file, blank writes none // 生成文件的 go:build 指令，留空则不写
+	GoBuildDirective     string                   // go:build directive for the generated file, blank falls back to sure.DirectiveSkipGenerate // 生成文件的 go:build 指令，留空则回退到 sure.DirectiveSkipGenerate
+
+	// States if the config settled the build constraint question, which a blank GoBuildDirective cannot show on its own
+	// Set via WithGoBuildDirective and WithNoBuildDirective, so a bare struct value leaves it false and picks up the default
+	// See utils.PickGoBuildDirective
+	//
+	// 配置是否就"构建约束"这件事表过态——光看 GoBuildDirective 是空串分不出来
+	// 由 WithGoBuildDirective 与 WithNoBuildDirective 置上，于是直接写结构体字面量时它为 false、从而吃到默认值
+	// 详见 utils.PickGoBuildDirective
+	directiveChosen bool
+
+	// Artifact this run is about to write, so the source scan can leave it alone
+	// GenerateClasses sets it from the enclosing config, since the output path lives there while the scan happens down here
+	// Blank where calling code reaches GenerateClassCodeWithErrorHandling on its own, which keeps that exported entrance acting as it once did
+	// See utils.IsOutputFile
+	//
+	// 本次将要写入的产物文件，好让源码扫描绕开它
+	// 由 GenerateClasses 从外层配置填进来——输出路径在外层，而扫描发生在这一层
+	// 调用方自行调用 GenerateClassCodeWithErrorHandling 时它为空，于是那个导出入口的行为一如既往
+	// 详见 utils.IsOutputFile
+	outputPath string
 }
 
 // NewClassGenOptions creates a new ClassGenOptions with the source root path
@@ -56,45 +76,46 @@ type ClassGenOptions struct {
 func NewClassGenOptions(srcRoot string) *ClassGenOptions {
 	return &ClassGenOptions{
 		SourceRootPath: srcRoot,
-		// The build constraint comes set as the default: the generated class and
-		// the test that makes it share one package, and that shape locks once the
-		// constraint goes missing. Drop it with WithNoBuildDirective.
-		// See sure.DirectiveSkipGenerate
-		// 默认带上构建约束：生成的类与生成它的测试同住一个包，缺了这道约束就会卡住。
+		// The build constraint comes set as the default, and a bare struct value reaches the same one through the fallback
+		// The generated class and the test that makes it share one package, and that shape locks once the constraint goes missing
+		// Drop it with WithNoBuildDirective. See sure.DirectiveSkipGenerate
+		// 默认带上构建约束，直接写结构体字面量的配置也会经由兜底拿到同一条
+		// 生成的类与生成它的测试同住一个包，缺了这道约束就会卡住
 		// 不想要的用 WithNoBuildDirective 清掉。详见 sure.DirectiveSkipGenerate
 		GoBuildDirective: sure.DirectiveSkipGenerate,
+		directiveChosen:  true,
 	}
 }
 
 // WithGoBuildDirective sets the go:build directive written into generated files
-// State a negated tag such as sure.DirectiveSkipGenerate, since a directive without
-// the leading "!" would drop the artifact from each standard build instead
+// State a negated tag such as sure.DirectiveSkipGenerate, since a directive without the leading "!" would drop the artifact from each standard build instead
 // Pass "!sure_generate" (sure.DirectiveSkipGenerate) to keep regeneration unlocked
 // Returns self to allow method chaining
 //
 // WithGoBuildDirective 设置写入生成文件的 go:build 指令
-// 要写取反的标签（如 sure.DirectiveSkipGenerate），因为漏掉开头的 "!" 会反过来
-// 让产物在每次普通构建里都被排除掉
+// 要写取反的标签（如 sure.DirectiveSkipGenerate），因为漏掉开头的 "!" 会反过来让产物在每次普通构建里都被排除掉
 // 传入 "!sure_generate"（sure.DirectiveSkipGenerate）可保持重新生成不被卡住
 // 返回自身以允许方法链式调用
 func (cfg *ClassGenOptions) WithGoBuildDirective(goBuildDirective string) *ClassGenOptions {
 	cfg.GoBuildDirective = goBuildDirective
+	cfg.directiveChosen = true
 	return cfg
 }
 
 // WithNoBuildDirective clears the directive so generated files state no constraint
-// Choosing this gives up the escape hatch: once a generated file stops compiling,
-// its package stops compiling, and the test inside cannot run to set it straight
+// This is the one route to a blank constraint, since a config that said nothing on the topic falls back to sure.DirectiveSkipGenerate
+// Choosing it gives up the escape hatch: once a generated file stops compiling, its package stops compiling, and the test inside cannot run to set it straight
 // See sure.DirectiveSkipGenerate
 // Returns self to allow method chaining
 //
 // WithNoBuildDirective 清除指令，使生成文件不带任何构建约束
-// 选它就等于放弃那道退路：生成文件一旦编译不过，它所在的包就编译不过，
-// 包里那个生成器测试也没法再跑起来修它
+// 这是让约束为空的唯一途径，因为压根没表过态的配置会回退到 sure.DirectiveSkipGenerate
+// 选它就等于放弃那道退路：生成文件一旦编译不过，它所在的包就编译不过，包里那个生成器测试也没法再跑起来修它
 // 参见 sure.DirectiveSkipGenerate
 // 返回自身以允许方法链式调用
 func (cfg *ClassGenOptions) WithNoBuildDirective() *ClassGenOptions {
 	cfg.GoBuildDirective = ""
+	cfg.directiveChosen = true
 	return cfg
 }
 
