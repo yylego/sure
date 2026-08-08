@@ -11,6 +11,7 @@ import (
 	"github.com/yylego/syntaxgo/syntaxgo_ast"
 )
 
+//go:generate go test -run ^TestGenerate$ -tags=sure_generate
 func TestGenerate(t *testing.T) {
 	cfg := &sure_cls_gen.ClassGenConfig{
 		ClassGenOptions: sure_cls_gen.NewClassGenOptions(runpath.PARENT.Path()).

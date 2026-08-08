@@ -1,9 +1,13 @@
+<!-- TEMPLATE (ZH) BEGIN: BADGES -->
+
 [![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/yylego/sure/release.yml?branch=main&label=BUILD)](https://github.com/yylego/sure/actions/workflows/release.yml?query=branch%3Amain)
 [![GoDoc](https://pkg.go.dev/badge/github.com/yylego/sure)](https://pkg.go.dev/github.com/yylego/sure)
 [![Coverage Status](https://img.shields.io/coveralls/github/yylego/sure/main.svg)](https://coveralls.io/github/yylego/sure?branch=main)
-[![Supported Go Versions](https://img.shields.io/badge/Go-1.24%2C%201.25-lightgrey.svg)](https://github.com/yylego/sure)
+[![Supported Go Versions](https://img.shields.io/badge/Go-1.24%2B-lightgrey.svg)](https://go.dev/)
 [![GitHub Release](https://img.shields.io/github/release/yylego/sure.svg)](https://github.com/yylego/sure/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/yylego/sure)](https://goreportcard.com/report/github.com/yylego/sure)
+
+<!-- TEMPLATE (ZH) CLOSE: BADGES -->
 
 # sure: 给现有 Go 代码添加断言和崩溃处理
 
@@ -17,7 +21,7 @@
 
 [ENGLISH README](README.md)
 
-<!-- TEMPLATE (ZH) END: LANGUAGE NAVIGATION -->
+<!-- TEMPLATE (ZH) CLOSE: LANGUAGE NAVIGATION -->
 
 ## 创作背景
 
@@ -395,6 +399,59 @@ response := Get("/api/data")
 
 ---
 
+## 生成文件的导入与构建约束
+
+### 导入自动搬运，无需手工登记
+
+生成器把方法签名当文本从源文件抄出来，所以签名里的外部类型（如 `plumbing.Hash`）需要对应的导入。这些导入**由生成器自动从源文件的导入块搬过来**，包括别名。
+
+这一点很要紧，因为有些导入是推不出来的：
+
+- 别名（`timekit "time"`）不对应任何包名
+- `github.com/go-git/go-git/v5` 的包名是 `git`，路径与包名互相推不出来
+
+搬多了无妨——生成代码没用到的导入会被 goimports 剪掉。若成品里出现"既非来自源文件、也非调用方登记"的导入路径，生成器会报错且不写盘，因为那只可能是猜出来的。
+
+扫描只留出一个文件不看：本轮即将被覆写的那个产物，于是上一轮产物的导入不会被一代代传下去。protoc-gen-go、mockgen 之类工具的产物照常参与扫描、照常被包装。
+
+`ImportOptions` 的手工登记（`AddPkgPath` / `AddInferredObject`）依然有效，用于登记源文件之外的包，比如自定义的错误处理函数所在的包。
+
+### 构建约束（解决重新生成问题）
+
+生成的包装类与生成它的测试同住一个包。生成文件一旦编译不过，它所在的包就编译不过，包里那个生成器测试也跑不起来、没法把它换掉。
+
+生成文件默认带上构建约束来解开这个锁：
+
+```go
+//go:build !sure_generate
+```
+
+- **普通编译**（`go build ./...`）：生成文件正常参与编译
+- **重新生成**（`go test -tags=sure_generate`）：生成文件被排除，生成器照样跑得起来并覆盖产物
+
+把对应指令写在生成器测试上方：
+
+```go
+//go:generate go test -run ^TestGenerate$ -tags=sure_generate
+func TestGenerate(t *testing.T) {
+    // ...
+}
+```
+
+产物坏掉时：
+
+```bash
+go generate ./...
+```
+
+不需要这道约束时，用 `WithNoBuildDirective()` 清掉。
+
+**注意一**：带标签跑测试时整个测试包仍要编译。若同包里有测试文件用到了生成出来的 API，给那些文件也加上同一行 `//go:build !sure_generate`。
+
+**注意二**：这个标签是给"定点重新生成"用的，不是给全模块构建用的。`sure_pkg_gen` 生成的是独立新包（源包不依赖它，因此不会自锁），所以它不写这道约束。
+
+---
+
 ## 最佳实践
 
 ### 何时使用 Must 模式
@@ -469,23 +526,23 @@ config := sureConfig.Load() // 生成的包装
 ---
 
 <!-- TEMPLATE (ZH) BEGIN: STANDARD PROJECT FOOTER -->
-<!-- VERSION 2025-09-26 07:39:27.188023 +0000 UTC -->
+<!-- VERSION 2025-11-25 03:52:28.131064 +0000 UTC -->
 
 ## 📄 许可证类型
 
-MIT 许可证。详见 [LICENSE](LICENSE)。
+MIT 许可证 - 详见 [LICENSE](LICENSE)。
 
 ---
 
-## 🤝 项目贡献
+## 💬 联系与反馈
 
 非常欢迎贡献代码！报告 BUG、建议功能、贡献代码：
 
-- 🐛 **发现问题？** 在 GitHub 上提交问题并附上重现步骤
-- 💡 **功能建议？** 创建 issue 讨论您的想法
-- 📖 **文档疑惑？** 报告问题，帮助我们改进文档
+- 🐛 **问题报告？** 在 GitHub 上提交问题并附上重现步骤
+- 💡 **新颖思路？** 创建 issue 讨论
+- 📖 **文档疑惑？** 报告问题，帮助我们完善文档
 - 🚀 **需要功能？** 分享使用场景，帮助理解需求
-- ⚡ **性能瓶颈？** 报告慢操作，帮助我们优化性能
+- ⚡ **性能瓶颈？** 报告慢操作，协助解决性能问题
 - 🔧 **配置困扰？** 询问复杂设置的相关问题
 - 📢 **关注进展？** 关注仓库以获取新版本和功能
 - 🌟 **成功案例？** 分享这个包如何改善工作流程
@@ -503,7 +560,7 @@ MIT 许可证。详见 [LICENSE](LICENSE)。
 4. **分支**：创建功能分支（`git checkout -b feature/xxx`）
 5. **编码**：实现您的更改并编写全面的测试
 6. **测试**：（Golang 项目）确保测试通过（`go test ./...`）并遵循 Go 代码风格约定
-7. **文档**：为面向用户的更改更新文档，并使用有意义的提交消息
+7. **文档**：面向用户的更改需要更新文档
 8. **暂存**：暂存更改（`git add .`）
 9. **提交**：提交更改（`git commit -m "Add feature xxx"`）确保向后兼容的代码
 10. **推送**：推送到分支（`git push origin feature/xxx`）
@@ -515,7 +572,7 @@ MIT 许可证。详见 [LICENSE](LICENSE)。
 
 ## 🌟 项目支持
 
-非常欢迎通过提交 Merge Request 和报告问题来为此项目做出贡献。
+非常欢迎通过提交 Merge Request 和报告问题来贡献此项目。
 
 **项目支持：**
 
@@ -526,10 +583,14 @@ MIT 许可证。详见 [LICENSE](LICENSE)。
 
 **祝你用这个包编程愉快！** 🎉🎉🎉
 
-<!-- TEMPLATE (ZH) END: STANDARD PROJECT FOOTER -->
+<!-- TEMPLATE (ZH) CLOSE: STANDARD PROJECT FOOTER -->
 
 ---
+
+<!-- TEMPLATE (ZH) BEGIN: GITHUB STARS -->
 
 ## GitHub 标星点赞
 
 [![Stargazers](https://starchart.cc/yylego/sure.svg?variant=adaptive)](https://starchart.cc/yylego/sure)
+
+<!-- TEMPLATE (ZH) CLOSE: GITHUB STARS -->

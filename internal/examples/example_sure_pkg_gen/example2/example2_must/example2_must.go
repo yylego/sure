@@ -1,6 +1,6 @@
 // Code generated using sure/sure_pkg_gen. DO NOT EDIT.
 // This file was auto generated via github.com/yylego/sure
-// Generated from: gen_test.go:20 -> example2.TestGenerate
+// Generated from: gen_test.go:28 -> example2.TestGenerate
 // ========== SURE:DO-NOT-EDIT-SECTION:END ==========
 
 package example2_must

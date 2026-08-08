@@ -3,15 +3,19 @@ package utils
 import "go/ast"
 
 // SourceMethodsTuple pairs source code with extracted methods
-// Contains source bytes and corresponding AST function declarations
+// Contains source bytes, corresponding AST function declarations, and the imports
+// the file states, so transcribed signatures keep types resolvable
 // Used during code generation to process methods
 //
 // SourceMethodsTuple 将源代码与提取的方法配对
-// 包含源字节和对应的 AST 函数声明
+// 包含源字节、对应的 AST 函数声明，以及该文件写明的导入——
+// 抄走的签名要靠它们才能让类型有出处
 // 在代码生成期间用于处理方法
 type SourceMethodsTuple struct {
-	SourceCode []byte          // Source code bytes // 源代码字节
-	MethodList []*ast.FuncDecl // Extracted method declarations // 提取的方法声明
+	Path          string          // Path of the file the methods came from // 方法所在文件的路径
+	SourceCode    []byte          // Source code bytes // 源代码字节
+	MethodList    []*ast.FuncDecl // Extracted method declarations // 提取的方法声明
+	SourceImports SourceImports   // Imports of the file the methods came from // 方法所在文件的导入
 }
 
 // SourceMethodsTuples represents a collection of source-method pairs

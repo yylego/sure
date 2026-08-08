@@ -1,3 +1,14 @@
+// This file uses the generated Must/Soft methods, so one same constraint drops it
+// alongside the generated files. Without this line, those symbols vanish once
+// -tags=sure_generate is set, the test package stops building, and that blocks the
+// regeneration this tag exists to enable. See sure.DirectiveSkipGenerate
+//
+// 本文件用到了生成出来的 Must/Soft 方法，所以跟着生成文件一起被同一道约束排除。
+// 少了这一行，带 -tags=sure_generate 时那些符号就不存在、测试包编译不过，
+// 反倒把这个标签本该放行的"重新生成"给堵住了。参见 sure.DirectiveSkipGenerate
+
+//go:build !sure_generate
+
 package example_sure_cls_gen
 
 import (

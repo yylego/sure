@@ -13,6 +13,7 @@ import (
 	"go/ast"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -70,6 +71,17 @@ func GenerateSurePackageFiles(cfg *SurePackageGenConfig) {
 		return utils.GetGenPosFuncMark(1)
 	})
 
+	// Build and check each file first, then write them in one pass. Writing as each
+	// one gets built would leave the preceding files on disk once a following one
+	// gets stopped, so the package on disk ends up half written
+	// 先全部生成、全部校验，再统一写盘。逐个文件边生成边写的话，
+	// 后面某个文件被拦住时，前面的已经落在磁盘上了，留下一个写了一半的包
+	type generatedFile struct {
+		path string
+		code string
+	}
+	var generatedFiles []generatedFile
+
 	for _, name := range utils.MustLs(cfg.SourceRoot) {
 		if filepath.Ext(name) != ".go" {
 			continue
@@ -105,6 +117,16 @@ func GenerateSurePackageFiles(cfg *SurePackageGenConfig) {
 			ptx.Println(utils.SetDoubleQuotes(cfg.SourcePackagePath))
 			ptx.Println(utils.SetDoubleQuotes(cfg.ErrorHandlingPkgPath))
 			ptx.Println(")")
+			// Take the source file's imports: signatures get transcribed as text,
+			// so a type inside (such as plumbing.Hash) needs a stated origin, else
+			// downstream code has to guess. This block sits beside the one above,
+			// and goimports prunes anything unused
+			// 取走源文件的导入：签名是当文本抄走的，抄来的类型（如 plumbing.Hash）得留着出处，
+			// 否则下游只能靠猜。这一段与上面那段并存，用不上的由 goimports 剪掉
+			sourceImports := utils.CollectPathImports(absPath)
+			if importBlock := sourceImports.FormatImportBlock(); importBlock != "" {
+				ptx.Println(importBlock)
+			}
 			ptx.Println(strings.Join(sureFunctionCodes, "\n"))
 
 			// 用 TrimSuffix 精确去掉 .go 扩展名再拼接，避免 strings.Replace 命中文件名中间
@@ -116,9 +138,22 @@ func GenerateSurePackageFiles(cfg *SurePackageGenConfig) {
 			// 注意这里只做语法与 goimports 检查，抓不到类型层错误（未定义标识符等仍会写盘，留待编译期暴露）。
 			newCode := rese.V1(formatgo.FormatCode(ptx.String()))
 
-			utils.MustWriteIntoPath(newPath, newCode)
-			zaplog.LOG.Info("Package file generation complete", zap.String("output", newPath))
+			// An import in the output with no source file and no statement from
+			// this codegen behind it has to be guesswork, so stop and write nothing
+			// 成品里若冒出既非源文件、也非本生成器写明的导入，那只能是猜出来的，就此打住不写盘
+			utils.MustKnownImports([]byte(newCode), slices.Concat(
+				sourceImports.Paths(),
+				[]string{cfg.SourcePackagePath, cfg.ErrorHandlingPkgPath}))
+
+			generatedFiles = append(generatedFiles, generatedFile{path: newPath, code: newCode})
 		}
+	}
+
+	// Each one passed the check, so writing them out is safe
+	// 到这儿说明每一份都过了校验，可以放心落盘
+	for _, generated := range generatedFiles {
+		utils.MustWriteIntoPath(generated.path, generated.code)
+		zaplog.LOG.Info("Package file generation complete", zap.String("output", generated.path))
 	}
 }
 

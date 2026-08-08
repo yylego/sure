@@ -1,9 +1,13 @@
+<!-- TEMPLATE (EN) BEGIN: BADGES -->
+
 [![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/yylego/sure/release.yml?branch=main&label=BUILD)](https://github.com/yylego/sure/actions/workflows/release.yml?query=branch%3Amain)
 [![GoDoc](https://pkg.go.dev/badge/github.com/yylego/sure)](https://pkg.go.dev/github.com/yylego/sure)
 [![Coverage Status](https://img.shields.io/coveralls/github/yylego/sure/main.svg)](https://coveralls.io/github/yylego/sure?branch=main)
-[![Supported Go Versions](https://img.shields.io/badge/Go-1.24%2C%201.25-lightgrey.svg)](https://github.com/yylego/sure)
+[![Supported Go Versions](https://img.shields.io/badge/Go-1.24%2B-lightgrey.svg)](https://go.dev/)
 [![GitHub Release](https://img.shields.io/github/release/yylego/sure.svg)](https://github.com/yylego/sure/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/yylego/sure)](https://goreportcard.com/report/github.com/yylego/sure)
+
+<!-- TEMPLATE (EN) CLOSE: BADGES -->
 
 # sure: Add Assertions and Crash Handling to Existing Go Code
 
@@ -17,11 +21,11 @@
 
 [中文说明](README.zh.md)
 
-<!-- TEMPLATE (EN) END: LANGUAGE NAVIGATION -->
+<!-- TEMPLATE (EN) CLOSE: LANGUAGE NAVIGATION -->
 
 ## CREATION_IDEAS
 
-[CREATION_IDEAS](internal/docs/CREATION_IDEAS.en.md)
+[CREATION_IDEAS](internal/docs/CREATION_IDEAS.md)
 
 ---
 
@@ -395,6 +399,59 @@ response := Get("/api/data")
 
 ---
 
+## Imports and Build Constraints in Generated Files
+
+### Imports move across without registration
+
+The generators transcribe method signatures as text, so an outside type in a signature (such as `plumbing.Hash`) needs its import. The generators take those imports from the scanned file's import block, aliases included.
+
+This matters because some imports cannot be deduced:
+
+- an alias (`timekit "time"`) matches no package name
+- `github.com/go-git/go-git/v5` is named `git`, and the path does not state the name
+
+Taking too much is safe: goimports drops what the generated code does not mention. When the finished code holds an import path that no scanned file and no registration has stated, the codegen stops and writes nothing, since such a path can have come from guesswork alone.
+
+The scan leaves out one file: the artifact this run is about to overwrite, so a past artifact's imports do not get handed down. Output from protoc-gen-go, mockgen and such stays in the scan and gets wrapped as before.
+
+Explicit registration through `ImportOptions` (`AddPkgPath` / `AddInferredObject`) remains in effect, and helps when a package appears in the generated code without appearing in the scanned sources, such as a custom exception handling package.
+
+### Build constraint that keeps regeneration possible
+
+A generated class lands in the same package as the test that regenerates it. Once a generated file stops compiling, its package stops compiling, and that test cannot run to replace the file.
+
+Generated files state a build constraint that breaks the deadlock:
+
+```go
+//go:build !sure_generate
+```
+
+- **Standard build** (`go build ./...`): the generated file takes part as before
+- **Regeneration** (`go test -tags=sure_generate`): the generated file drops out, so the codegen runs and overwrites the artifact
+
+Put the matching directive above the test that regenerates:
+
+```go
+//go:generate go test -run ^TestGenerate$ -tags=sure_generate
+func TestGenerate(t *testing.T) {
+    // ...
+}
+```
+
+When an artifact breaks:
+
+```bash
+go generate ./...
+```
+
+Use `WithNoBuildDirective()` to opt out of the constraint.
+
+**Note 1**: a tagged test run compiles the whole test package too. When a test file in that package uses the generated API, state the same `//go:build !sure_generate` line on that test file too.
+
+**Note 2**: the tag suits targeted regeneration, not whole-module builds. `sure_pkg_gen` emits standalone packages that the scanned package does not depend on, so it cannot deadlock and states no constraint.
+
+---
+
 ## Best Practices
 
 ### When to Use Must Mode
@@ -469,20 +526,20 @@ Each example includes:
 ---
 
 <!-- TEMPLATE (EN) BEGIN: STANDARD PROJECT FOOTER -->
-<!-- VERSION 2025-09-26 07:39:27.188023 +0000 UTC -->
+<!-- VERSION 2025-11-25 03:52:28.131064 +0000 UTC -->
 
 ## 📄 License
 
-MIT License. See [LICENSE](LICENSE).
+MIT License - see [LICENSE](LICENSE).
 
 ---
 
-## 🤝 Contributing
+## 💬 Contact & Feedback
 
 Contributions are welcome! Report bugs, suggest features, and contribute code:
 
-- 🐛 **Found a mistake?** Open an issue on GitHub with reproduction steps
-- 💡 **Have a feature idea?** Create an issue to discuss the suggestion
+- 🐛 **Mistake reports?** Open an issue on GitHub with reproduction steps
+- 💡 **Fresh ideas?** Create an issue to discuss
 - 📖 **Documentation confusing?** Report it so we can improve
 - 🚀 **Need new features?** Share the use cases to help us understand requirements
 - ⚡ **Performance issue?** Help us optimize through reporting slow operations
@@ -503,7 +560,7 @@ New code contributions, follow this process:
 4. **Branch**: Create a feature branch (`git checkout -b feature/xxx`).
 5. **Code**: Implement the changes with comprehensive tests
 6. **Testing**: (Golang project) Ensure tests pass (`go test ./...`) and follow Go code style conventions
-7. **Documentation**: Update documentation to support client-facing changes and use significant commit messages
+7. **Documentation**: Update documentation to support client-facing changes
 8. **Stage**: Stage changes (`git add .`)
 9. **Commit**: Commit changes (`git commit -m "Add feature xxx"`) ensuring backward compatible code
 10. **Push**: Push to the branch (`git push origin feature/xxx`).
@@ -526,10 +583,14 @@ Welcome to contribute to this project via submitting merge requests and reportin
 
 **Have Fun Coding with this package!** 🎉🎉🎉
 
-<!-- TEMPLATE (EN) END: STANDARD PROJECT FOOTER -->
+<!-- TEMPLATE (EN) CLOSE: STANDARD PROJECT FOOTER -->
 
 ---
 
+<!-- TEMPLATE (EN) BEGIN: GITHUB STARS -->
+
 ## GitHub Stars
 
-[![starring](https://starchart.cc/yylego/sure.svg?variant=adaptive)](https://starchart.cc/yylego/sure)
+[![Stargazers](https://starchart.cc/yylego/sure.svg?variant=adaptive)](https://starchart.cc/yylego/sure)
+
+<!-- TEMPLATE (EN) CLOSE: GITHUB STARS -->

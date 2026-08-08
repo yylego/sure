@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,14 +56,59 @@ func GenerateClasses(cfg *ClassGenConfig, objects ...any) {
 	must.Nice(cfg.ClassGenOptions.SourceRootPath)
 	must.Nice(cfg.PackageName)
 	must.Nice(cfg.OutputPath)
+	utils.MustRoot(cfg.ClassGenOptions.SourceRootPath)
+
+	// One scan up front gathers the imports of each source file: signatures get
+	// transcribed as text, so the types inside need a stated origin. This repeats
+	// the scan inside GenerateClassWithErrorHandlingMode, and buys leaving that
+	// exported signature untouched, since downstream code calls it and a changed
+	// signature breaks such code. Codegen runs at development time, so one extra
+	// pass across the source tree costs nothing worth counting
+	// 先扫一遍把各源文件的导入收齐：方法签名是当文本抄走的，抄来的类型得留着出处。
+	// 这一趟与 GenerateClassWithErrorHandlingMode 内部那趟重复，换来的是不动它的导出签名——
+	// 下游直接调用它，改签名会把下游搞挂。生成器只在开发期跑，多读一遍目录不值一提
+	sourceMethodsTuples := make(utils.SourceMethodsTuples, 0)
+	for _, object := range objects {
+		typeName := reflect.TypeOf(object).Name()
+		tuples := utils.CollectReceiverMethods(cfg.ClassGenOptions.SourceRootPath, typeName)
+		if len(tuples) == 0 {
+			// A wrapping class with no methods in it is almost sure a mistake, so
+			// speak up instead of writing such a class in silence
+			// 一个方法都没有的包装类几乎肯定是哪里搞错了，出声说明，而不是默默写出这么个类
+			zaplog.LOG.Warn("No methods with this receiver type in the source root",
+				zap.String("type", typeName),
+				zap.String("root", cfg.ClassGenOptions.SourceRootPath))
+		}
+		sourceMethodsTuples = append(sourceMethodsTuples, tuples...)
+	}
+	// 排除即将被覆写的那个产物，免得它的导入被一轮轮传下去。详见 DropOutputFile
+	sourceImports := sourceMethodsTuples.DropOutputFile(cfg.OutputPath).MergeSourceImports()
 
 	ptx := utils.NewPTX()
 	ptx.Println("// Code generated using sure/sure_cls_gen. DO NOT EDIT.")
 	ptx.Println("// This file was auto generated via github.com/yylego/sure")
+	// The generated file and the test that makes it share one package, and that
+	// shape can lock, which a build constraint undoes. Set as the default, dropped
+	// with WithNoBuildDirective. See sure.DirectiveSkipGenerate
+	// 生成文件与生成它的测试同住一个包，这个格局会卡住；构建约束就是那把钥匙。
+	// 默认带上，可用 WithNoBuildDirective 去掉。详见 sure.DirectiveSkipGenerate
+	if goBuildLine := utils.FormatGoBuildDirective(cfg.ClassGenOptions.GoBuildDirective); goBuildLine != "" {
+		ptx.Println()
+		ptx.Println(goBuildLine)
+		ptx.Println()
+	}
 	ptx.Println("// Generated from:", utils.GetGenPosFuncMark(1))
 	ptx.Println("// ========== SURE:DO-NOT-EDIT-SECTION:END ==========")
 	ptx.Println()
 	ptx.Println("package", cfg.PackageName)
+	// The taken imports form a block beside the one injected beneath, since Go
+	// accepts more than one import declaration in a file. Anything unused gets
+	// pruned once goimports runs, so taking too much is safe
+	// 取来的导入自成一段，与下面注入的那段并存，因为 Go 允许一个文件有多段导入声明。
+	// 用不上的会被 goimports 剪掉，所以取多了无妨
+	if importBlock := sourceImports.FormatImportBlock(); importBlock != "" {
+		ptx.Println(importBlock)
+	}
 
 	for _, object := range objects {
 		ptx.Println(GenerateClassCodeWithErrorHandling(cfg.ClassGenOptions, object))
@@ -93,6 +139,11 @@ func GenerateClasses(cfg *ClassGenConfig, objects ...any) {
 	// Format code without extra import resolution to save time
 	// 格式化代码时不额外解析导入以节省时间
 	newSource := done.VAE(formatgo.FormatBytes(source)).Nice()
+
+	// An import in the output with no source file and no registration behind it
+	// has to be guesswork, so stop at this point and write nothing
+	// 成品里若冒出既非源文件、也非调用方登记的导入，那只能是猜出来的，就此打住不写盘
+	utils.MustKnownImports(newSource, slices.Concat(sourceImports.Paths(), importOptions.GetPkgPaths()))
 
 	// Write formatted code to output path
 	// 将格式化的代码写入输出路径

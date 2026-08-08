@@ -11,15 +11,15 @@ import (
 	"github.com/yylego/syntaxgo/syntaxgo_ast"
 )
 
+//go:generate go test -run ^TestGenerate$ -tags=sure_generate
 func TestGenerate(t *testing.T) {
 	param := cls_stub_gen.NewStubParam(&example1.A{}, "example1.STUB1")
 
-	cfg := &cls_stub_gen.StubGenConfig{
-		SourceRootPath:    runpath.PARENT.Join("../../example1"),
-		TargetPackageName: syntaxgo.CurrentPackageName(),
-		ImportOptions:     syntaxgo_ast.NewPackageImportOptions(),
-		OutputPath:        runtestpath.SrcPath(t),
-		AllowFileCreation: false,
-	}
+	cfg := cls_stub_gen.NewStubGenConfig(
+		runpath.PARENT.Join("../../example1"),
+		syntaxgo.CurrentPackageName(),
+		runtestpath.SrcPath(t),
+	).WithImportOptions(syntaxgo_ast.NewPackageImportOptions())
+
 	cls_stub_gen.GenerateStubs(cfg, param)
 }

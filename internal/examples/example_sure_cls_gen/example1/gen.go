@@ -1,6 +1,9 @@
 // Code generated using sure/sure_cls_gen. DO NOT EDIT.
 // This file was auto generated via github.com/yylego/sure
-// Generated from: gen_test.go:25 -> example1.TestGenerate
+
+//go:build !sure_generate
+
+// Generated from: gen_test.go:26 -> example1.TestGenerate
 // ========== SURE:DO-NOT-EDIT-SECTION:END ==========
 
 package example1
