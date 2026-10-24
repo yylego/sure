@@ -11,6 +11,7 @@ package sure_pkg_gen
 
 import (
 	"go/ast"
+	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
@@ -67,9 +68,11 @@ func GenerateSurePackageFiles(cfg *SurePackageGenConfig) {
 	zaplog.LOG.Debug("Starting package generation from source root", zap.String("root", cfg.SourceRoot))
 
 	// 位置追踪：若上游入口已捕获则沿用，否则在此直连入口处捕获（skip=1 指向直接调用方）。
-	genPosFuncMark := zerotern.VF(cfg.genPosFuncMark, func() string {
-		return utils.GetGenPosFuncMark(1)
-	})
+	// 不能放进闭包里取：那样 skip=1 指向的是调用闭包的 zerotern.VF，而不是用户。
+	genPosFuncMark := cfg.genPosFuncMark
+	if genPosFuncMark == "" {
+		genPosFuncMark = utils.GetGenPosFuncMark(1)
+	}
 
 	// Build and check each file first, then write them in one pass. Writing as each
 	// one gets built would leave the preceding files on disk once a following one
@@ -82,7 +85,13 @@ func GenerateSurePackageFiles(cfg *SurePackageGenConfig) {
 	}
 	var generatedFiles []generatedFile
 
-	for _, name := range utils.MustLs(cfg.SourceRoot) {
+	for _, item := range done.VAE(os.ReadDir(cfg.SourceRoot)).Done() {
+		// A DIR name can end in .go too, and reading it as a file stops the run
+		// 目录名也可能以 .go 结尾，把它当文件读会让流程崩掉
+		if item.IsDir() {
+			continue
+		}
+		name := item.Name()
 		if filepath.Ext(name) != ".go" {
 			continue
 		}
@@ -121,8 +130,8 @@ func GenerateSurePackageFiles(cfg *SurePackageGenConfig) {
 			ptx.Println()
 			ptx.Println("package" + " " + newPackageName)
 			ptx.Println("import(")
-			ptx.Println(utils.SetDoubleQuotes(cfg.SourcePackagePath))
-			ptx.Println(utils.SetDoubleQuotes(cfg.ErrorHandlingPkgPath))
+			ptx.Println(strconv.Quote(cfg.SourcePackagePath))
+			ptx.Println(strconv.Quote(cfg.ErrorHandlingPkgPath))
 			ptx.Println(")")
 			// Take the source file's imports: signatures get transcribed as text,
 			// so a type inside (such as plumbing.Hash) needs a stated origin, else
@@ -189,7 +198,7 @@ func GenerateSureFunctions(cfg *SurePackageGenConfig, absPath string) []string {
 		if astFunc.Recv != nil { // methods are not wrapped at package scope // 方法不在包作用域包装
 			continue
 		}
-		if !utils.C0IsUppercase(astFunc.Name.Name) { // exported functions alone // 仅处理导出函数
+		if !token.IsExported(astFunc.Name.Name) { // exported functions alone // 仅处理导出函数
 			continue
 		}
 		results := parseFunctionReturnFields(sourceCode, astFunc)
@@ -219,7 +228,8 @@ func makeFunctionCode(
 ) string {
 	genericTypeParams := syntaxgo_astnorm.GetGenericTypeParamsMap(astFunc.Type.TypeParams)
 
-	var newFunctionCode = "func " + astFunc.Name.Name
+	var newFunctionCode strings.Builder
+	newFunctionCode.WriteString("func " + astFunc.Name.Name)
 	if astFunc.Type.TypeParams != nil {
 		// 类型参数列表：约束若引用源包的导出类型（如 [T Numeric]）也要加包前缀，
 		// 不能像旧写法那样整段原样拷贝，否则生成包里 Numeric 未定义。
@@ -232,7 +242,7 @@ func makeFunctionCode(
 			constraintText := syntaxgo_astnorm.ResolveQualifiedType(field.Type, packageName, genericTypeParams, sourceCode)
 			typeParamTexts = append(typeParamTexts, strings.Join(names, ",")+" "+constraintText)
 		}
-		newFunctionCode += "[" + strings.Join(typeParamTexts, ",") + "]"
+		newFunctionCode.WriteString("[" + strings.Join(typeParamTexts, ",") + "]")
 	}
 
 	// 收集会出现在包装签名里的形参名，供后面给合成名（arg/res/err）避让，防止 := 撞车。
@@ -245,7 +255,7 @@ func makeFunctionCode(
 		}
 	}
 
-	newFunctionCode += "("
+	newFunctionCode.WriteString("(")
 	var argumentNames []string
 	if astFunc.Type.Params != nil && len(astFunc.Type.Params.List) > 0 {
 		var args []string
@@ -256,7 +266,7 @@ func makeFunctionCode(
 			_, variadic := param.Type.(*ast.Ellipsis)
 
 			if len(param.Names) == 0 {
-				argName := uniqueName("arg"+strconv.Itoa(len(args)), reservedNames)
+				argName := utils.UniqueName("arg"+strconv.Itoa(len(args)), reservedNames)
 				reservedNames[argName] = true
 
 				args = append(args, argName+" "+argType)
@@ -265,22 +275,29 @@ func makeFunctionCode(
 				sigNames := make([]string, 0, len(param.Names))
 
 				for _, name := range param.Names {
-					sigNames = append(sigNames, name.Name)
-					argumentNames = append(argumentNames, invokeArgName(name.Name, variadic))
+					// The wrapping passes each input on, and a blank name "_" cannot get read back, so it gets a name of its own
+					// 包装要把每个参数传下去，而空白名 "_" 读不回来，所以给它起个名字
+					argName := name.Name
+					if argName == "_" {
+						argName = utils.UniqueName("arg"+strconv.Itoa(len(argumentNames)), reservedNames)
+						reservedNames[argName] = true
+					}
+					sigNames = append(sigNames, argName)
+					argumentNames = append(argumentNames, invokeArgName(argName, variadic))
 				}
 
 				args = append(args, strings.Join(sigNames, ",")+" "+argType)
 			}
 		}
-		newFunctionCode += strings.Join(args, ",")
+		newFunctionCode.WriteString(strings.Join(args, ","))
 	}
-	newFunctionCode += ")"
+	newFunctionCode.WriteString(")")
 
 	// 给合成的返回值名（err/res0…）避让形参名：源码 func F(err int) error 若直接
 	// 生成 err:=F(err)，会因 := 左侧无新变量而编译失败。仅重命名撞车项，不影响常规输出。
 	for _, res := range results {
 		if reservedNames[res.Name] {
-			res.Name = uniqueName(res.Name, reservedNames)
+			res.Name = utils.UniqueName(res.Name, reservedNames)
 		}
 		reservedNames[res.Name] = true
 	}
@@ -309,42 +326,42 @@ func makeFunctionCode(
 		}
 		if len(resultNames) > 0 {
 			if len(resultNames) < 2 && anonymousReturn {
-				newFunctionCode += " " + resultNames[0]
+				newFunctionCode.WriteString(" " + resultNames[0])
 			} else {
-				newFunctionCode += " " + "(" + strings.Join(resultNames, ",") + ")"
+				newFunctionCode.WriteString(" " + "(" + strings.Join(resultNames, ",") + ")")
 			}
 		}
 	}
-	newFunctionCode += " " + "{" + "\n"
+	newFunctionCode.WriteString(" " + "{" + "\n")
 	if len(results) > 0 {
 		var rets = make([]string, 0, len(results))
 		for _, res := range results {
 			rets = append(rets, res.Name)
 		}
-		newFunctionCode += strings.Join(rets, ",")
+		newFunctionCode.WriteString(strings.Join(rets, ","))
 		if anonymousReturn || containsErrorReturn {
-			newFunctionCode += ":="
+			newFunctionCode.WriteString(":=")
 		} else {
-			newFunctionCode += "="
+			newFunctionCode.WriteString("=")
 		}
 	}
-	newFunctionCode += packageName + "." + astFunc.Name.Name
+	newFunctionCode.WriteString(packageName + "." + astFunc.Name.Name)
 	if astFunc.Type.TypeParams != nil {
-		newFunctionCode += "["
+		newFunctionCode.WriteString("[")
 		var genericTypeNames []string
 		for _, xts := range astFunc.Type.TypeParams.List {
 			for _, xtx := range xts.Names {
 				genericTypeNames = append(genericTypeNames, xtx.Name)
 			}
 		}
-		newFunctionCode += strings.Join(genericTypeNames, ",")
-		newFunctionCode += "]"
+		newFunctionCode.WriteString(strings.Join(genericTypeNames, ","))
+		newFunctionCode.WriteString("]")
 	}
-	newFunctionCode += "(" + strings.Join(argumentNames, ",") + ")" + "\n"
+	newFunctionCode.WriteString("(" + strings.Join(argumentNames, ",") + ")" + "\n")
 	if len(results) > 0 {
 		for _, x := range results {
 			if x.Type == "error" {
-				newFunctionCode += sureHandlerFuncReference + "." + string(errorHandlingMode) + "(" + x.Name + ")" + "\n"
+				newFunctionCode.WriteString(sureHandlerFuncReference + "." + string(errorHandlingMode) + "(" + x.Name + ")" + "\n")
 			}
 		}
 	}
@@ -357,11 +374,11 @@ func makeFunctionCode(
 			rets = append(rets, res.Name)
 		}
 		if len(rets) > 0 {
-			newFunctionCode += "return" + " " + strings.Join(rets, ",") + "\n"
+			newFunctionCode.WriteString("return" + " " + strings.Join(rets, ",") + "\n")
 		}
 	}
-	newFunctionCode += "}" + "\n"
-	return newFunctionCode
+	newFunctionCode.WriteString("}" + "\n")
+	return newFunctionCode.String()
 }
 
 // invokeArgName renders an input name at the invocation site, spreading variadic args with "..."
@@ -372,24 +389,6 @@ func invokeArgName(name string, variadic bool) string {
 		return name + "..."
 	}
 	return name
-}
-
-// uniqueName returns base when it is free, otherwise base with the smallest
-// numeric suffix that is not yet taken. Keeps synthesized names (arg/res/err)
-// from clashing with genuine input names inside the generated wrapping.
-//
-// uniqueName 在 base 未被占用时原样返回，否则加最小的、尚未占用的数字后缀。
-// 用于让合成名（arg/res/err）不与包装函数里真实的形参名撞车。
-func uniqueName(base string, used map[string]bool) string {
-	if !used[base] {
-		return base
-	}
-	for n := 0; ; n++ {
-		candidate := base + strconv.Itoa(n)
-		if !used[candidate] {
-			return candidate
-		}
-	}
 }
 
 // resultType represents a function return value with metadata
@@ -421,32 +420,39 @@ func parseFunctionReturnFields(source []byte, astFunction *ast.FuncDecl) []*resu
 		var errNum int
 		for _, elem := range astFunction.Type.Results.List {
 			resType := syntaxgo_astnode.GetText(source, elem.Type)
-			eIs := resType == "error"
-			if len(elem.Names) == 0 {
-				resName := tern.BFF(eIs, func() string {
+			isError := resType == "error"
+			synthesizeName := func() string {
+				return tern.BFF(isError, func() string {
 					return tern.BVV(errNum == 0, "err", "err"+strconv.Itoa(errNum))
 				}, func() string {
 					return "res" + strconv.Itoa(len(results))
 				})
-
+			}
+			if len(elem.Names) == 0 {
 				results = append(results, &resultType{
-					Name:        resName,
+					Name:        synthesizeName(),
 					Type:        resType,
 					TypeNode:    elem.Type,
 					IsAnonymous: true,
 				})
-				if eIs {
+				if isError {
 					errNum++
 				}
 			} else {
 				for _, name := range elem.Names {
+					// A blank name "_" cannot be read back, so it gets a name as an anonymous result does
+					// 空白名 "_" 读不回来，所以像匿名返回值那样给它起个名字
+					resName := name.Name
+					if resName == "_" {
+						resName = synthesizeName()
+					}
 					results = append(results, &resultType{
-						Name:        name.Name,
+						Name:        resName,
 						Type:        resType,
 						TypeNode:    elem.Type,
 						IsAnonymous: false,
 					})
-					if eIs {
+					if isError {
 						errNum++
 					}
 				}

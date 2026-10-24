@@ -8,7 +8,7 @@
 
 ## 基本函数
 
-该包的核心就是提供两个函数:
+该包的核心就是提供三个函数:
 
 ```
 // Must 硬硬的，当有err时直接panic崩溃掉，流程中止
@@ -16,6 +16,9 @@ func Must(err error)
 
 // Soft 软软的，当有err时只打印个告警日志，流程继续
 func Soft(err error)
+
+// Omit 静静的，当有err时什么也不做，流程继续
+func Omit(err error)
 ```
 
 ## 简单调用
@@ -30,7 +33,7 @@ sure.Must(err) //当没有错误时就什么也不做，当出错时将 panic �
 也可以使用:
 
 ```
-sure.Soft(err) //当没有错误时就什么也不做，当出错时将会打印 waring 日志
+sure.Soft(err) //当没有错误时就什么也不做，当出错时将会打印 warning 日志
 ```
 
 当然很明显，像这样粗暴地抛出异常在正式场景下可能不适用，需要谨慎考虑。

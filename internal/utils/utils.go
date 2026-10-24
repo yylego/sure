@@ -1,10 +1,10 @@
 // Package utils provides internal utilities supporting code generation and validation
-// Offers JSON formatting, file operations, and type checking functions
+// Offers JSON formatting, file operations, and calling position tracing
 // Supports code generation workflows with validation and exception handling
 // Contains support functions used across different generation packages
 //
 // Package utils 提供支持代码生成和验证的内部工具函数
-// 提供 JSON 格式化、文件操作和类型检查函数
+// 提供 JSON 格式化、文件操作和调用位置追踪
 // 支持带有验证和异常处理的代码生成工作流
 // 包含跨不同生成包使用的辅助函数
 package utils
@@ -15,28 +15,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
-	"unicode"
 
 	"github.com/pkg/errors"
 	"github.com/yylego/done"
 	"github.com/yylego/erero"
 )
-
-// Neat2json converts value to formatted JSON string
-// Uses indented JSON format with tabs to make it readable
-// Panics on exception to ensure invalid data is not silenced
-//
-// Neat2json 将值转换为格式化的 JSON 字符串
-// 使用带缩进的 JSON 格式提高可读性
-// 异常时 panic 以确保无效数据不被忽略
-func Neat2json(v any) string {
-	data, err := NeatBytes(v)
-	if err != nil {
-		panic(errors.WithMessage(err, "wrong"))
-	}
-	return string(data)
-}
 
 // NeatBytes converts value to formatted JSON bytes
 // Returns indented JSON with tabs to make it readable
@@ -51,17 +34,6 @@ func NeatBytes(v any) ([]byte, error) {
 		return nil, errors.WithMessage(err, "wrong")
 	}
 	return data, nil
-}
-
-// In checks if value exists in slice
-// Uses generic type constraint to ensure safe typing
-// Returns true when value is found in slice
-//
-// In 检查值是否存在于切片中
-// 使用泛型类型约束确保类型安全
-// 当在切片中找到值时返回 true
-func In[V comparable](v V, slice []V) bool {
-	return slices.Contains(slice, v)
 }
 
 // MustRoot validates that path exists and is a root
@@ -132,48 +104,6 @@ func IsFileExist(path string) (bool, error) {
 func MustWriteIntoPath(path string, s string) {
 	done.Done(os.MkdirAll(filepath.Dir(path), 0755))
 	done.Done(os.WriteFile(path, []byte(s), 0644))
-}
-
-// MustLs reads root and returns the names inside
-// Panics on read exception to ensure operation succeeds
-// Returns a slice of the names inside the root
-//
-// MustLs 读取根目录并返回条目名称
-// 读取异常时 panic 以确保操作成功
-// 返回根目录中条目名称的切片
-func MustLs(root string) (names []string) {
-	infos := done.VAE(os.ReadDir(root)).Done()
-	names = make([]string, 0, len(infos))
-	for _, info := range infos {
-		names = append(names, info.Name())
-	}
-	return
-}
-
-// C0IsUppercase checks if the leading rune is uppercase
-// Returns true when the string starts with an uppercase rune
-// Returns false when the string is blank / starts with lowercase
-//
-// C0IsUppercase 检查首字符是否为大写
-// 当字符串以大写字母开头时返回 true
-// 当字符串为空或以小写开头时返回 false
-func C0IsUppercase(s string) bool {
-	runes := []rune(s)
-	if len(runes) > 0 {
-		return unicode.IsUpper(runes[0])
-	}
-	return false
-}
-
-// SetDoubleQuotes wraps string with double quotes
-// Used to format import paths in generated code
-// Returns a quoted string fit to insert into code
-//
-// SetDoubleQuotes 用双引号包裹字符串
-// 用于格式化生成代码中的导入路径
-// 返回准备插入代码的带引号字符串
-func SetDoubleQuotes(s string) string {
-	return "\"" + s + "\""
 }
 
 // GetGenPosFuncMark gets position information to trace code generation

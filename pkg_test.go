@@ -13,7 +13,7 @@ import (
 // TestGetPkgPath 测试 GetPkgPath 函数
 // 验证可以通过反射获取包路径
 func TestGetPkgPath(t *testing.T) {
-	t.Log(sure.GetPkgPath())
+	require.Equal(t, "github.com/yylego/sure", sure.GetPkgPath())
 }
 
 // TestGetPkgName tests the GetPkgName function

@@ -53,12 +53,12 @@ The package provides three distinct generators, each serving different code tran
 
 - Transform existing code without modification
 - Generate type-safe wrappers with assertions
-- Preserve function signatures and documentation
+- Keep function signatures, generics and variadic parameters
 
 🔧 **Flexible Integration**
 
 - Works with existing Go projects
-- No runtime dependencies in generated code
+- Generated code depends on the sure package alone
 - Compatible with standard Go packages
 
 📦 **Multiple Generation Strategies**
@@ -96,14 +96,14 @@ This becomes verbose and repetitive across large codebases.
 With `sure`, generate assertion-enabled wrappers:
 
 ```go
-// Source function
-func ReadConfig(path string) (*Config, error)
+// Source method
+func (c *Config) Read(path string) ([]byte, error)
 
 // Generated wrapping (Must mode)
-func (s *SureConfig) ReadConfig(path string) *Config
+func (T *ConfigMust) Read(path string) (res []byte)
 
 // Usage - crashes on issues, no hand-written checks needed
-config := sureConfig.ReadConfig("config.json")
+data := config.Must().Read("config.json")
 ```
 
 The generated code handles assertions, enabling clean business logic.
@@ -120,10 +120,10 @@ The generated code handles assertions, enabling clean business logic.
 
 **How It Works**:
 
-1. Takes an existing struct/interface
-2. Analyzes each method with issue returns
-3. Generates wrapping class with assertion methods
-4. Each wrapping method removes issue returns, adding assertion logic
+1. Takes an existing struct type
+2. Scans the methods of that type in the source files
+3. Generates one wrapping class with each mode, Must and Soft as the default
+4. Each wrapping method drops the error returns and asserts them, while a method without errors gets forwarded as is
 
 **Example**:
 
@@ -140,13 +140,14 @@ func (db *DB) Close() error
 Generated assertion wrapping:
 
 ```go
-type SureDB struct {
+type DBMust struct {
     db *DB
 }
 
-func (s *SureDB) Connect(dsn string) // panics on issue
-func (s *SureDB) Query(sql string) *Result // panics on issue
-func (s *SureDB) Close() // panics on issue
+func (db *DB) Must() *DBMust // entrance on the source type
+func (T *DBMust) Connect(dsn string) // panics on issue
+func (T *DBMust) Query(sql string) (res *Result) // panics on issue
+func (T *DBMust) Close() // panics on issue
 ```
 
 **Benefits**:
@@ -171,7 +172,7 @@ See: [sure_cls_gen example](internal/examples/example_sure_cls_gen)
 **How It Works**:
 
 1. Scans target package functions
-2. Identifies functions with issue returns
+2. Takes each exported function, including those without error returns
 3. Generates new package with assertion wrappers
 4. Maintains function signatures (minus issue returns)
 
@@ -190,7 +191,7 @@ func Validate(cfg *Config) error
 Generated assertion package:
 
 ```go
-package sureconfig
+package config_must
 
 func Load(path string) *Config // panics on issue
 func Parse(data []byte) *Config // panics on issue
@@ -284,12 +285,10 @@ go get github.com/yylego/sure
 ### 1. Basic Class Wrapping Generation
 
 ```go
-import (
-    "github.com/yylego/sure"
-    "github.com/yylego/sure/sure_cls_gen"
-)
+import "github.com/yylego/sure/sure_cls_gen"
 
 // Generate assertion-wrapped classes into the output file
+// Must and Soft come as the default, add Omit via MoreErrorHandlingModes(sure.OMIT)
 cfg := &sure_cls_gen.ClassGenConfig{
     ClassGenOptions: sure_cls_gen.NewClassGenOptions(sourceRoot),
     PackageName:     "mypackage",
@@ -320,14 +319,11 @@ sure_pkg_gen.GenerateSurePackage(
 ```go
 import "github.com/yylego/sure/cls_stub_gen"
 
-// Generate package-scope wrapping
-stubConfig := &cls_stub_gen.StubGenConfig{
-    SourceRootPath:    projectPath,
-    TargetPackageName: "api",
-    OutputPath:        outputPath,
-}
+// Generate package-scope wrapping into the output file
+// The output file has to exist, else add .WithAllowFileCreation(true)
+stubConfig := cls_stub_gen.NewStubGenConfig(projectPath, "api", outputPath)
 
-code := cls_stub_gen.GenerateStubMethods(
+cls_stub_gen.GenerateStubs(
     stubConfig,
     cls_stub_gen.NewStubParam(singletonInstance, "instance"),
 )
@@ -342,23 +338,23 @@ code := cls_stub_gen.GenerateStubMethods(
 Source code with repetitive checks:
 
 ```go
-conn, err := db.Connect(dsn)
+err := db.Connect(dsn)
 if err != nil { return err }
 
-result, err := conn.Query(sql)
+result, err := db.Query(sql)
 if err != nil { return err }
 
-err = conn.Close()
+err = db.Close()
 if err != nil { return err }
 ```
 
 With `sure_cls_gen`:
 
 ```go
-sureDB := NewSureDB(db)
-sureDB.Connect(dsn)
-result := sureDB.Query(sql)
-sureDB.Close()
+dbMust := db.Must()
+dbMust.Connect(dsn)
+result := dbMust.Query(sql)
+dbMust.Close()
 ```
 
 ### Scenario 2: Configuration Management
@@ -376,8 +372,8 @@ if err != nil { return err }
 With `sure_pkg_gen`:
 
 ```go
-cfg := sureconfig.Load("app.json")
-sureconfig.Validate(cfg)
+cfg := config_must.Load("app.json")
+config_must.Validate(cfg)
 ```
 
 ### Scenario 3: API Client Usage
@@ -387,14 +383,13 @@ Source singleton:
 ```go
 client.SetEndpoint(url)
 response, err := client.Get("/api/data")
-if err != nil { return err }
 ```
 
-With `cls_stub_gen`:
+With `cls_stub_gen`, no instance in sight, and each result comes back as the method returns it:
 
 ```go
 SetEndpoint(url)
-response := Get("/api/data")
+response, err := Get("/api/data")
 ```
 
 ---
@@ -478,7 +473,6 @@ Use `sure.OMIT` when:
 
 - Issues are expected and acceptable
 - Silent failure is desired
-- Performance-sensitive paths
 - When issues are handled elsewhere
 
 ---
@@ -501,7 +495,7 @@ config := done.VAE(LoadConfig()).Nice()
 **Example with sure**:
 
 ```go
-config := sureConfig.Load() // generated wrapping
+config := config_must.Load("app.json") // generated wrapping
 ```
 
 Both approaches reduce boilerplate, choose based on context.
@@ -584,13 +578,3 @@ Welcome to contribute to this project via submitting merge requests and reportin
 **Have Fun Coding with this package!** 🎉🎉🎉
 
 <!-- TEMPLATE (EN) CLOSE: STANDARD PROJECT FOOTER -->
-
----
-
-<!-- TEMPLATE (EN) BEGIN: GITHUB STARS -->
-
-## GitHub Stars
-
-[![Stargazers](https://starchart.cc/yylego/sure.svg?variant=adaptive)](https://starchart.cc/yylego/sure)
-
-<!-- TEMPLATE (EN) CLOSE: GITHUB STARS -->

@@ -10,7 +10,6 @@
 package sure_cls_gen
 
 import (
-	"fmt"
 	"os"
 	"reflect"
 	"slices"
@@ -26,6 +25,7 @@ import (
 	"github.com/yylego/syntaxgo/syntaxgo_astnode"
 	"github.com/yylego/syntaxgo/syntaxgo_astnorm"
 	"github.com/yylego/syntaxgo/syntaxgo_reflect"
+	"github.com/yylego/tern"
 	"github.com/yylego/tern/zerotern"
 	"github.com/yylego/zaplog"
 	"go.uber.org/zap"
@@ -161,13 +161,8 @@ func GenerateClasses(cfg *ClassGenConfig, objects ...any) {
 	// 将格式化的代码写入输出路径
 	duration := time.Since(sinceTime)
 	zaplog.LOG.Debug("Source code formatting completed", zap.Duration("cost", duration), zap.Int("bytes", len(newSource)))
-	if cfg.OutputPath != "" {
-		done.Done(os.WriteFile(cfg.OutputPath, newSource, 0644))
-		zaplog.LOG.Info("Classes generation complete", zap.String("output", cfg.OutputPath), zap.Int("objects", len(objects)))
-	} else {
-		fmt.Println(string(newSource))
-		zaplog.LOG.Debug("Generated code output to stdout", zap.Int("bytes", len(newSource)))
-	}
+	done.Done(os.WriteFile(cfg.OutputPath, newSource, 0644))
+	zaplog.LOG.Info("Classes generation complete", zap.String("output", cfg.OutputPath), zap.Int("objects", len(objects)))
 }
 
 // GenerateClassCodeWithErrorHandling generates class code with multiple exception handling modes
@@ -238,20 +233,21 @@ func GenerateClassWithErrorHandlingMode(cfg *ClassGenOptions, object any, errorH
 			// 这里点名的是 sure 声明的全部模式、而非本轮恰好要生成的那几个——两者不一致时才见分晓
 			// 缩到只剩 Must 的那一轮，会把残留的 Omit 当成源方法，写出一句调用早已不再生成的类
 			// 本轮自己的产物在扫描阶段就已被绕开（utils.IsOutputFile），因此这道守卫挡的是"共用同一源目录的邻居生成器留下的产物"
-			if utils.In(sure.ErrorHandlingMode(methodName), sure.ErrorHandlingModes()) {
+			if slices.Contains(sure.ErrorHandlingModes(), sure.ErrorHandlingMode(methodName)) {
 				continue
 			}
 			// ErrorHandlingMode is a plain string type, so calling code can state a mode of its own
 			// Such a mode sits outside the set above, and its entrance belongs out of the wrapping just the same
 			// ErrorHandlingMode 就是个字符串类型，调用方可以自定义模式
 			// 那种模式不在上面那个集合里，但它的入口方法同样不该被包装
-			if utils.In(sure.ErrorHandlingMode(methodName), cfg.ErrorHandlingModes) {
+			if slices.Contains(cfg.ErrorHandlingModes, sure.ErrorHandlingMode(methodName)) {
 				continue
 			}
 
 			var params = make(syntaxgo_astnorm.NameTypeElements, 0)
 			if methodFunc.Type != nil && methodFunc.Type.Params != nil {
 				params = syntaxgo_astnorm.GetSimpleArgElements(methodFunc.Type.Params.List, sourceCode)
+				utils.NameBlankParams(params)
 			}
 			var results = make(syntaxgo_astnorm.NameTypeElements, 0)
 			if methodFunc.Type != nil && methodFunc.Type.Results != nil {
@@ -266,6 +262,11 @@ func GenerateClassWithErrorHandlingMode(cfg *ClassGenOptions, object any, errorH
 				takenNames[param.Name] = true
 			}
 			for _, result := range results {
+				// A blank name "_" cannot be read back, so it gets a name as an anonymous result does
+				// 空白名 "_" 读不回来，所以像匿名返回值那样给它起个名字
+				if result.Name == "_" {
+					result.Name = tern.BVV(syntaxgo_astnode.GetText(sourceCode, result.Type) == "error", "err", "res")
+				}
 				if takenNames[result.Name] {
 					result.Name = utils.UniqueName(result.Name, takenNames)
 				}
@@ -287,10 +288,9 @@ func GenerateClassWithErrorHandlingMode(cfg *ClassGenOptions, object any, errorH
 			}
 
 			var errorHandlingStatements []string
+			handlerPkg := zerotern.VF(cfg.ErrorHandlerFuncName, sure.GetPkgName)
 			for _, errName := range errorResultElements.GenerateFunctionParams() {
-				sureNode := zerotern.VF(cfg.ErrorHandlerFuncName, sure.GetPkgName)
-
-				errorHandlingStatements = append(errorHandlingStatements, sureNode+"."+string(errorHandlingMode)+"("+errName+")")
+				errorHandlingStatements = append(errorHandlingStatements, handlerPkg+"."+string(errorHandlingMode)+"("+errName+")")
 			}
 
 			// 包装方法的接收者名：避开字段名（否则生成 a.a）和本方法的参数名

@@ -39,6 +39,10 @@ func TestMust(t *testing.T) {
 	t.Log("-")
 
 	t.Log(string(data))
+
+	require.Panics(t, func() {
+		sure.Must(errors.New("wrong"))
+	})
 }
 
 // TestSoft tests how the Soft function acts
@@ -49,9 +53,9 @@ func TestMust(t *testing.T) {
 // 验证 Soft 记录警告但继续执行
 // 创建测试错误以验证软处理
 func TestSoft(t *testing.T) {
-	t.Log("-")
-	sure.Soft(errors.New("wrong")) //将会告警，而且程序将继续执行
-	t.Log("-")
+	require.NotPanics(t, func() {
+		sure.Soft(errors.New("wrong")) //将会告警，而且程序将继续执行
+	})
 }
 
 // TestOmit tests how the Omit function acts
@@ -62,9 +66,9 @@ func TestSoft(t *testing.T) {
 // 验证 Omit 静默忽略错误
 // 创建测试错误以验证忽略处理
 func TestOmit(t *testing.T) {
-	t.Log("-")
-	sure.Omit(errors.New("wrong")) //将会忽略，而且程序将继续执行
-	t.Log("-")
+	require.NotPanics(t, func() {
+		sure.Omit(errors.New("wrong")) //将会忽略，而且程序将继续执行
+	})
 }
 
 // TestErrorHandlingModes checks the stated set and its sequence, and that each invocation gets a fresh slice
@@ -72,7 +76,7 @@ func TestOmit(t *testing.T) {
 // The codegens compare a method name against this set to spot a generated entrance, so a missing mode makes them wrap a wrapping
 // Handing back the same slice each time would let a sort in one spot reach the next, hence the check on independence
 //
-// # TestErrorHandlingModes 检查声明出的模式集合与顺序，以及每次调用拿到的都是新切片
+// TestErrorHandlingModes 检查声明出的模式集合与顺序，以及每次调用拿到的都是新切片。
 //
 // 各生成器拿方法名与这个集合比对，以认出"生成出来的入口"，漏一个模式就会给包装再包一层
 // 每次返回同一个切片的话，某个调用方的排序会波及下一个，所以要查这份独立性

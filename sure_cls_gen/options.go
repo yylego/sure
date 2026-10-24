@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/yylego/erero"
 	"github.com/yylego/sure"
 	"github.com/yylego/tern"
 	"github.com/yylego/tern/zerotern"
@@ -213,24 +214,27 @@ func (cfg *ClassGenOptions) GetErrorHandlingModes() []sure.ErrorHandlingMode {
 // GenerateNewClassName 根据模式和模式创建新类名
 // 使用命名模式将对象类型名与错误处理模式组合
 // 返回格式化的类名作为字符串
-func (cfg *ClassGenOptions) GenerateNewClassName(objectType reflect.Type, sureFlag sure.ErrorHandlingMode) string {
+func (cfg *ClassGenOptions) GenerateNewClassName(objectType reflect.Type, errorHandlingMode sure.ErrorHandlingMode) string {
+	modeName := string(errorHandlingMode)
 	return zerotern.VF(cfg.NewClassName, func() string {
 		switch cfg.NamingPatternType {
 		case STYLE_PREFIX_LOWER_TYPE:
-			return strings.ToLower(string(sureFlag)) + cfg.NewClassNameParts + objectType.Name()
+			return strings.ToLower(modeName) + cfg.NewClassNameParts + objectType.Name()
 		case STYLE_SUFFIX_LOWER_TYPE:
-			return objectType.Name() + cfg.NewClassNameParts + strings.ToLower(string(sureFlag))
+			return objectType.Name() + cfg.NewClassNameParts + strings.ToLower(modeName)
 
 		case STYLE_PREFIX_UPPER_TYPE:
-			return strings.ToUpper(string(sureFlag)) + cfg.NewClassNameParts + objectType.Name()
+			return strings.ToUpper(modeName) + cfg.NewClassNameParts + objectType.Name()
 		case STYLE_SUFFIX_UPPER_TYPE:
-			return objectType.Name() + cfg.NewClassNameParts + strings.ToUpper(string(sureFlag))
+			return objectType.Name() + cfg.NewClassNameParts + strings.ToUpper(modeName)
 
 		case STYLE_PREFIX_CAMELCASE_TYPE:
-			return string(sureFlag) + cfg.NewClassNameParts + objectType.Name()
+			return modeName + cfg.NewClassNameParts + objectType.Name()
 		case STYLE_SUFFIX_CAMELCASE_TYPE, NamingPattern(""): //默认值就是 ClassNameMust 或者 ClassNameSoft 新类名
-			return objectType.Name() + cfg.NewClassNameParts + string(sureFlag)
+			return objectType.Name() + cfg.NewClassNameParts + modeName
 		}
-		return strings.ToLower(string(sureFlag)) + cfg.NewClassNameParts + objectType.Name()
+		// A pattern outside the set above is a mistake in calling code, so name it instead of picking some pattern in its place
+		// 不在上面那组里的模式是调用方写错了，指名报出来，而不是随手换一种模式顶上
+		panic(erero.Errorf("unknown naming pattern %q", cfg.NamingPatternType))
 	})
 }

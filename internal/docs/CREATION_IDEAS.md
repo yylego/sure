@@ -8,7 +8,7 @@ This package enables code to provide panic/warning options when errors happen.
 
 ## Core Functions
 
-The core of this package provides two functions:
+The core of this package provides three functions:
 
 ```go
 // Must - Hard, panics and crashes on error, halting the process
@@ -16,6 +16,9 @@ func Must(err error)
 
 // Soft - Soft, prints a warning log on error, continues the process
 func Soft(err error)
+
+// Omit - Quiet, does nothing on error, continues the process
+func Omit(err error)
 ```
 
 ## Simple Usage

@@ -10,7 +10,7 @@
 package cls_stub_gen
 
 import (
-	"fmt"
+	"go/token"
 	"os"
 	"slices"
 	"strings"
@@ -248,22 +248,17 @@ func GenerateStubs(config *StubGenConfig, stubParams ...*StubParam) {
 	// 将格式化的代码写入输出路径
 	duration := time.Since(sinceTime)
 	zaplog.LOG.Debug("Source code formatting completed", zap.Duration("cost", duration), zap.Int("bytes", len(newSource)))
-	if config.OutputPath != "" {
-		if config.AllowFileCreation {
-			// Allow new file creation, but might write to wrong location if misconfigured
-			// 允许创建新文件，但如果配置错误可能写入错误位置
-			zaplog.LOG.Warn("Writing to target source path with file creation enabled", zap.String("path", config.OutputPath))
-		} else {
-			// Recommended: create file first to ensure correct location
-			// 推荐：先创建文件以确保位置正确
-			utils.MustFile(config.OutputPath) // Require target file to exist // 要求目标文件必须存在
-		}
-		done.Done(os.WriteFile(config.OutputPath, newSource, 0644))
-		zaplog.LOG.Info("Stub functions generation complete", zap.String("output", config.OutputPath))
+	if config.AllowFileCreation {
+		// Allow new file creation, but might write to wrong location if misconfigured
+		// 允许创建新文件，但如果配置错误可能写入错误位置
+		zaplog.LOG.Warn("Writing to target source path with file creation enabled", zap.String("path", config.OutputPath))
 	} else {
-		fmt.Println(string(newSource))
-		zaplog.LOG.Debug("Generated stub functions output to stdout", zap.Int("bytes", len(newSource)))
+		// Recommended: create file first to ensure correct location
+		// 推荐：先创建文件以确保位置正确
+		utils.MustFile(config.OutputPath) // Require target file to exist // 要求目标文件必须存在
 	}
+	done.Done(os.WriteFile(config.OutputPath, newSource, 0644))
+	zaplog.LOG.Info("Stub functions generation complete", zap.String("output", config.OutputPath))
 }
 
 // GenerateStubMethods generates stub methods to wrap a single object
@@ -303,13 +298,14 @@ func GenerateStubMethods(cfg *StubGenConfig, stubParam *StubParam) string {
 
 			// 仅包装导出方法：生成的 stub 位于目标包、跨包调用源包的方法，
 			// 未导出方法跨包不可见，生成出来必然编译不过。与 pkg_gen 的同款守卫一致。
-			if !utils.C0IsUppercase(methodName) {
+			if !token.IsExported(methodName) {
 				continue
 			}
 
 			var methodParameters = make(syntaxgo_astnorm.NameTypeElements, 0)
 			if methodFunction.Type != nil && methodFunction.Type.Params != nil {
 				methodParameters = syntaxgo_astnorm.GetSimpleArgElements(methodFunction.Type.Params.List, sourceCode)
+				utils.NameBlankParams(methodParameters)
 
 				for _, elem := range methodParameters {
 					// 把方法里的源包类型（含 []Foo / map 等复合类型）限定到目标包。

@@ -18,6 +18,7 @@ import (
 	"github.com/yylego/done"
 	"github.com/yylego/erero"
 	"github.com/yylego/syntaxgo/syntaxgo_ast"
+	"github.com/yylego/syntaxgo/syntaxgo_astnorm"
 	"github.com/yylego/syntaxgo/syntaxgo_search"
 )
 
@@ -36,6 +37,24 @@ func UniqueName(base string, used map[string]bool) string {
 		candidate := base + strconv.Itoa(n)
 		if !used[candidate] {
 			return candidate
+		}
+	}
+}
+
+// NameBlankParams gives each "_" input a name of its own, since the wrapping passes each input on and "_" cannot get read back
+// The name takes the position, as "arg0" / "arg1" do with unnamed inputs, and skips past names held by the remaining inputs
+//
+// NameBlankParams 给每个叫 "_" 的参数起个名字，因为包装要把每个参数原样传下去，而 "_" 读不回来
+// 名字按位置取，与未命名参数的 "arg0" / "arg1" 一致，并避开其他参数已占用的名字
+func NameBlankParams(params syntaxgo_astnorm.NameTypeElements) {
+	takenNames := make(map[string]bool, len(params))
+	for _, param := range params {
+		takenNames[param.Name] = true
+	}
+	for idx, param := range params {
+		if param.Name == "_" {
+			param.Name = UniqueName("arg"+strconv.Itoa(idx), takenNames)
+			takenNames[param.Name] = true
 		}
 	}
 }

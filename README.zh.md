@@ -53,12 +53,12 @@
 
 - 无需修改即可转换现有代码
 - 生成类型安全的断言包装
-- 保留函数签名和文档
+- 保留函数签名、泛型和可变参数
 
 🔧 **灵活集成**
 
 - 适用于现有 Go 项目
-- 生成的代码无运行时依赖
+- 生成的代码只依赖 sure 包
 - 兼容标准 Go 包
 
 📦 **多种生成策略**
@@ -96,14 +96,14 @@ if err != nil {
 使用 `sure`，生成启用断言的包装：
 
 ```go
-// 源函数
-func ReadConfig(path string) (*Config, error)
+// 源方法
+func (c *Config) Read(path string) ([]byte, error)
 
 // 生成的包装（Must 模式）
-func (s *SureConfig) ReadConfig(path string) *Config
+func (T *ConfigMust) Read(path string) (res []byte)
 
 // 使用 - 遇到问题时崩溃，无需手动检查
-config := sureConfig.ReadConfig("config.json")
+data := config.Must().Read("config.json")
 ```
 
 生成的代码处理断言，使业务逻辑更简洁。
@@ -120,10 +120,10 @@ config := sureConfig.ReadConfig("config.json")
 
 **工作原理**：
 
-1. 获取现有的结构体/接口
-2. 分析所有返回问题的方法
-3. 生成带有断言方法的包装类
-4. 每个包装方法移除问题返回，添加断言逻辑
+1. 获取现有的结构体类型
+2. 扫描源文件里该类型的方法
+3. 每种模式生成一个包装类，默认生成 Must 和 Soft
+4. 每个包装方法去掉 error 返回值、改为断言，不返回 error 的方法原样转发
 
 **示例**：
 
@@ -140,13 +140,14 @@ func (db *DB) Close() error
 生成的断言包装：
 
 ```go
-type SureDB struct {
+type DBMust struct {
     db *DB
 }
 
-func (s *SureDB) Connect(dsn string) // 遇到问题时 panic
-func (s *SureDB) Query(sql string) *Result // 遇到问题时 panic
-func (s *SureDB) Close() // 遇到问题时 panic
+func (db *DB) Must() *DBMust // 源类型上的入口方法
+func (T *DBMust) Connect(dsn string) // 遇到问题时 panic
+func (T *DBMust) Query(sql string) (res *Result) // 遇到问题时 panic
+func (T *DBMust) Close() // 遇到问题时 panic
 ```
 
 **优势**：
@@ -171,7 +172,7 @@ func (s *SureDB) Close() // 遇到问题时 panic
 **工作原理**：
 
 1. 扫描目标包函数
-2. 识别返回问题的函数
+2. 取出每个导出函数，不论是否返回 error
 3. 生成带有断言包装的新包
 4. 维护函数签名（减去问题返回）
 
@@ -190,7 +191,7 @@ func Validate(cfg *Config) error
 生成的断言包：
 
 ```go
-package sureconfig
+package config_must
 
 func Load(path string) *Config // 遇到问题时 panic
 func Parse(data []byte) *Config // 遇到问题时 panic
@@ -284,12 +285,10 @@ go get github.com/yylego/sure
 ### 1. 基础类包装生成
 
 ```go
-import (
-    "github.com/yylego/sure"
-    "github.com/yylego/sure/sure_cls_gen"
-)
+import "github.com/yylego/sure/sure_cls_gen"
 
 // 将断言包装类生成到输出文件
+// 默认生成 Must 和 Soft，要 Omit 用 MoreErrorHandlingModes(sure.OMIT) 加上
 cfg := &sure_cls_gen.ClassGenConfig{
     ClassGenOptions: sure_cls_gen.NewClassGenOptions(sourceRoot),
     PackageName:     "mypackage",
@@ -320,14 +319,11 @@ sure_pkg_gen.GenerateSurePackage(
 ```go
 import "github.com/yylego/sure/cls_stub_gen"
 
-// 生成包级包装
-stubConfig := &cls_stub_gen.StubGenConfig{
-    SourceRootPath:    projectPath,
-    TargetPackageName: "api",
-    OutputPath:        outputPath,
-}
+// 将包级包装生成到输出文件
+// 输出文件要先存在，否则加上 .WithAllowFileCreation(true)
+stubConfig := cls_stub_gen.NewStubGenConfig(projectPath, "api", outputPath)
 
-code := cls_stub_gen.GenerateStubMethods(
+cls_stub_gen.GenerateStubs(
     stubConfig,
     cls_stub_gen.NewStubParam(singletonInstance, "instance"),
 )
@@ -342,23 +338,23 @@ code := cls_stub_gen.GenerateStubMethods(
 带有重复检查的源代码：
 
 ```go
-conn, err := db.Connect(dsn)
+err := db.Connect(dsn)
 if err != nil { return err }
 
-result, err := conn.Query(sql)
+result, err := db.Query(sql)
 if err != nil { return err }
 
-err = conn.Close()
+err = db.Close()
 if err != nil { return err }
 ```
 
 使用 `sure_cls_gen`：
 
 ```go
-sureDB := NewSureDB(db)
-sureDB.Connect(dsn)
-result := sureDB.Query(sql)
-sureDB.Close()
+dbMust := db.Must()
+dbMust.Connect(dsn)
+result := dbMust.Query(sql)
+dbMust.Close()
 ```
 
 ### 场景 2：配置管理
@@ -376,8 +372,8 @@ if err != nil { return err }
 使用 `sure_pkg_gen`：
 
 ```go
-cfg := sureconfig.Load("app.json")
-sureconfig.Validate(cfg)
+cfg := config_must.Load("app.json")
+config_must.Validate(cfg)
 ```
 
 ### 场景 3：API 客户端使用
@@ -387,14 +383,13 @@ sureconfig.Validate(cfg)
 ```go
 client.SetEndpoint(url)
 response, err := client.Get("/api/data")
-if err != nil { return err }
 ```
 
-使用 `cls_stub_gen`：
+使用 `cls_stub_gen`，不用再拿着实例，每个结果照方法原样返回：
 
 ```go
 SetEndpoint(url)
-response := Get("/api/data")
+response, err := Get("/api/data")
 ```
 
 ---
@@ -478,7 +473,6 @@ go generate ./...
 
 - 问题是预期且可接受的
 - 希望静默失败
-- 性能关键路径
 - 当问题在其他地方处理时
 
 ---
@@ -501,7 +495,7 @@ config := done.VAE(LoadConfig()).Nice()
 **sure 示例**：
 
 ```go
-config := sureConfig.Load() // 生成的包装
+config := config_must.Load("app.json") // 生成的包装
 ```
 
 两种方法都减少样板代码，根据上下文选择。
@@ -584,13 +578,3 @@ MIT 许可证 - 详见 [LICENSE](LICENSE)。
 **祝你用这个包编程愉快！** 🎉🎉🎉
 
 <!-- TEMPLATE (ZH) CLOSE: STANDARD PROJECT FOOTER -->
-
----
-
-<!-- TEMPLATE (ZH) BEGIN: GITHUB STARS -->
-
-## GitHub 标星点赞
-
-[![Stargazers](https://starchart.cc/yylego/sure.svg?variant=adaptive)](https://starchart.cc/yylego/sure)
-
-<!-- TEMPLATE (ZH) CLOSE: GITHUB STARS -->

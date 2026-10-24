@@ -37,18 +37,18 @@ type SourceMethodsTuples []*SourceMethodsTuple
 // 跳过空白标识符 "_"（它不能当结构体字段或值使用）
 // 当未找到接收器时返回空字符串
 func (mts SourceMethodsTuples) GetReceiverVariableName() string {
-	for _, codePage := range mts {
-		for _, mebFunction := range codePage.MethodList {
-			if mebFunction.Recv == nil {
+	for _, tuple := range mts {
+		for _, methodFunc := range tuple.MethodList {
+			if methodFunc.Recv == nil {
 				continue
 			}
-			if len(mebFunction.Recv.List) == 0 {
+			if len(methodFunc.Recv.List) == 0 {
 				continue
 			}
-			if len(mebFunction.Recv.List[0].Names) == 0 {
+			if len(methodFunc.Recv.List[0].Names) == 0 {
 				continue
 			}
-			name := mebFunction.Recv.List[0].Names[0].Name
+			name := methodFunc.Recv.List[0].Names[0].Name
 			// 跳过空白接收者 "_"：若当成变量名，会生成 `struct{ _ *A }` 与 `&AMust{_:_}`（把 _ 当值）
 			// 及 `T._`（取空白字段），全都编译不过。视同"没名字"，继续找或最终退到 "T"。
 			if name != "" && name != "_" {
